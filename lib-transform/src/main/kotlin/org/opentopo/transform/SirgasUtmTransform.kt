@@ -44,7 +44,7 @@ object SirgasUtmTransform {
 
     fun epsg(zone: Int, hemisphere: UtmHemisphere): Int? = when (hemisphere) {
         UtmHemisphere.SOUTH -> if (zone in 18..25) 31960 + zone else null
-        UtmHemisphere.NORTH -> if (zone in 18..23) 31954 + zone else null
+        UtmHemisphere.NORTH -> if (zone in 18..22) 31954 + zone else null
     }
 
     fun forward(

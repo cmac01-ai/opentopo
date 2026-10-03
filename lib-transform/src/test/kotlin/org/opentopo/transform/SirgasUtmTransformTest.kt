@@ -76,7 +76,8 @@ class SirgasUtmTransformTest {
         assertEquals(31978, SirgasUtmTransform.epsg(18, UtmHemisphere.SOUTH))
         assertEquals(31985, SirgasUtmTransform.epsg(25, UtmHemisphere.SOUTH))
         assertEquals(31972, SirgasUtmTransform.epsg(18, UtmHemisphere.NORTH))
-        assertEquals(31977, SirgasUtmTransform.epsg(23, UtmHemisphere.NORTH))
+        assertEquals(31976, SirgasUtmTransform.epsg(22, UtmHemisphere.NORTH))
+        assertNull(SirgasUtmTransform.epsg(23, UtmHemisphere.NORTH))
         assertNull(SirgasUtmTransform.epsg(17, UtmHemisphere.SOUTH))
     }
 }

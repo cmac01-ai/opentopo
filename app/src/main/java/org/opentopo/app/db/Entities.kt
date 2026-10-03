@@ -12,6 +12,7 @@ data class ProjectEntity(
     val name: String,
     val description: String = "",
     /** Stored CRS identifier. New Brazilian projects use SIRGAS2000_UTM. */
+    @ColumnInfo(defaultValue = "EGSA87")
     val coordinateSystem: String = "SIRGAS2000_UTM",
     /** Null means automatic UTM zone derived from longitude. */
     val utmZone: Int? = null,

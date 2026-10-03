@@ -1899,7 +1899,7 @@ private fun PeekCoordinates(
         }
         val heightStr = ellipsoidal?.let { "${"%.3f".format(it)} m" }
         CoordinateBlock(
-            label = "EGSA87 \u00B7 EPSG 2100",
+            label = crsLabel,
             easting = "${"%.3f".format(projectedCoords.eastingM)} m",
             northing = "${"%.3f".format(projectedCoords.northingM)} m",
             height = heightStr,
@@ -1909,7 +1909,7 @@ private fun PeekCoordinates(
     } else {
         // No fix yet — show a placeholder for the active project CRS.
         CoordinateBlock(
-            label = "EGSA87 \u00B7 EPSG 2100",
+            label = crsLabel,
             easting = "\u2014",
             northing = "\u2014",
             height = null,
