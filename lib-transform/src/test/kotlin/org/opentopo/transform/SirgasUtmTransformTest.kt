@@ -59,10 +59,10 @@ class SirgasUtmTransformTest {
     @Test
     fun `zone can be forced for projects near a UTM boundary`() {
         val automatic = SirgasUtmTransform.forward(
-            GeographicCoordinate(latitudeDeg = -20.0, longitudeDeg = -42.01),
+            GeographicCoordinate(latitudeDeg = -20.0, longitudeDeg = -41.99),
         )
         val forced = SirgasUtmTransform.forward(
-            GeographicCoordinate(latitudeDeg = -20.0, longitudeDeg = -42.01),
+            GeographicCoordinate(latitudeDeg = -20.0, longitudeDeg = -41.99),
             zoneOverride = 23,
         )
 
