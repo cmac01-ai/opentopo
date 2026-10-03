@@ -160,6 +160,8 @@ fun MainMapScreen(
     val ntripState by ntripClient.state.collectAsState()
     val projectedCoords by surveyManager?.projectedPosition?.collectAsState()
         ?: remember { mutableStateOf(null) }
+    val projectedCrsLabel by surveyManager?.projectedCrsLabel?.collectAsState()
+        ?: remember { mutableStateOf("SIRGAS2000 · UTM") }
     val recordingState =
         surveyManager?.recordingState?.collectAsState()?.value ?: RecordingState()
     val context = LocalContext.current
@@ -582,11 +584,12 @@ fun MainMapScreen(
 
                 Spacer(Modifier.height(10.dp))
 
-                // ── v2 peek content: EGSA87 CoordinateBlock (no pill — pill lives up top) ──
+                // ── v2 peek content: active project CRS CoordinateBlock ──
                 PeekCoordinates(
                     position = position,
                     accuracy = accuracy,
                     projectedCoords = projectedCoords,
+                    crsLabel = projectedCrsLabel,
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -1870,14 +1873,14 @@ private fun InlineShortNavBar(
 }
 
 /**
- * v2 peek card. Shows the projected EGSA87 coordinate as a `CoordinateBlock` with the
- * fix pill + σH footer, followed by a thin WGS84 secondary row below.
+ * v2 peek card. Shows coordinates in the active project's projected CRS.
  */
 @Composable
 private fun PeekCoordinates(
     position: org.opentopo.app.gnss.PositionState,
     accuracy: org.opentopo.app.gnss.AccuracyState,
     projectedCoords: org.opentopo.transform.ProjectedCoordinate?,
+    crsLabel: String,
 ) {
     val sigmaH = accuracy.horizontalAccuracyM
     val sigmaV = accuracy.altitudeErrorM
@@ -1904,7 +1907,7 @@ private fun PeekCoordinates(
             sigmaH = sigmaFooter,
         )
     } else {
-        // No fix yet — show a placeholder EGSA87 block with empty values.
+        // No fix yet — show a placeholder for the active project CRS.
         CoordinateBlock(
             label = "EGSA87 \u00B7 EPSG 2100",
             easting = "\u2014",
@@ -1982,6 +1985,8 @@ private fun NewProjectHeaderDialog(
 ) {
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var coordinateSystem by remember { mutableStateOf("SIRGAS2000_UTM") }
+    var utmZone by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
 
     androidx.compose.material3.AlertDialog(
@@ -2010,6 +2015,68 @@ private fun NewProjectHeaderDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+
+                var crsExpanded by remember { mutableStateOf(false) }
+                Box {
+                    TextButton(onClick = { crsExpanded = true }) {
+                        Text(
+                            if (coordinateSystem == "SIRGAS2000_UTM")
+                                "SIRGAS2000 / UTM"
+                            else
+                                "EGSA87 / EPSG:2100"
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = crsExpanded,
+                        onDismissRequest = { crsExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("SIRGAS2000 / UTM") },
+                            onClick = {
+                                coordinateSystem = "SIRGAS2000_UTM"
+                                crsExpanded = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("EGSA87 / EPSG:2100 (legacy)") },
+                            onClick = {
+                                coordinateSystem = "EGSA87"
+                                utmZone = null
+                                crsExpanded = false
+                            },
+                        )
+                    }
+                }
+
+                if (coordinateSystem == "SIRGAS2000_UTM") {
+                    var zoneExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { zoneExpanded = true }) {
+                            Text(utmZone?.let { "UTM ${it}S" } ?: "UTM zone: automatic")
+                        }
+                        DropdownMenu(
+                            expanded = zoneExpanded,
+                            onDismissRequest = { zoneExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Automatic from longitude") },
+                                onClick = {
+                                    utmZone = null
+                                    zoneExpanded = false
+                                },
+                            )
+                            (18..25).forEach { zone ->
+                                DropdownMenuItem(
+                                    text = { Text("UTM ${zone}S") },
+                                    onClick = {
+                                        utmZone = zone
+                                        zoneExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -2020,6 +2087,8 @@ private fun NewProjectHeaderDialog(
                             val project = org.opentopo.app.db.ProjectEntity(
                                 name = name,
                                 description = description,
+                                coordinateSystem = coordinateSystem,
+                                utmZone = utmZone,
                             )
                             val id = db.projectDao().insert(project)
                             surveyManager?.setActiveProject(id)

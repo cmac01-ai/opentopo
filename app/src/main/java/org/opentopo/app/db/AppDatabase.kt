@@ -11,7 +11,7 @@ import org.opentopo.app.ntrip.NtripProfileDao
 
 @Database(
     entities = [ProjectEntity::class, PointEntity::class, TrigPointCacheEntity::class, NtripProfile::class],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -108,6 +108,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v8 → v9: persist the coordinate reference system per project.
+         *
+         * Existing projects pre-date SIRGAS support and therefore remain EGSA87.
+         * New projects are created as SIRGAS2000_UTM by ProjectEntity defaults/UI.
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN coordinateSystem TEXT NOT NULL DEFAULT 'EGSA87'")
+                db.execSQL("ALTER TABLE projects ADD COLUMN utmZone INTEGER")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -117,7 +130,7 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }

@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
     private var surveyManager: SurveyManager? = null
     private var stakeout: Stakeout? = null
     private var heposTransform: org.opentopo.transform.HeposTransform? = null
+    private lateinit var coordinateSystemService: org.opentopo.app.coordinates.CoordinateSystemService
     lateinit var trigPointService: TrigPointService
         private set
 
@@ -142,23 +143,18 @@ class MainActivity : ComponentActivity() {
         ntripProfileRepo = NtripProfileRepository(this, db, ntripClient, prefs)
         lifecycleScope.launch { ntripProfileRepo.seedIfEmpty() }
 
-        // Initialize transform-dependent services
-        try {
+        // HEPOS is optional: SIRGAS2000/UTM works without the Greek grid assets.
+        heposTransform = try {
             val deStream = assets.open("dE_2km_V1-0.grd")
             val dnStream = assets.open("dN_2km_V1-0.grd")
-            surveyManager = SurveyManager(db, gnssState, deStream, dnStream)
-
-            val deStream3 = assets.open("dE_2km_V1-0.grd")
-            val dnStream3 = assets.open("dN_2km_V1-0.grd")
             val geoidStream = try { assets.open("geoid_hepos07.grd") } catch (_: Exception) { null }
-            heposTransform = org.opentopo.transform.HeposTransform(deStream3, dnStream3, geoidStream)
-
-            val deStream2 = assets.open("dE_2km_V1-0.grd")
-            val dnStream2 = assets.open("dN_2km_V1-0.grd")
-            stakeout = Stakeout(gnssState, deStream2, dnStream2)
+            org.opentopo.transform.HeposTransform(deStream, dnStream, geoidStream)
         } catch (_: Exception) {
-            // Grid files missing — transform features disabled
+            null
         }
+        coordinateSystemService = org.opentopo.app.coordinates.CoordinateSystemService(heposTransform)
+        surveyManager = SurveyManager(db, gnssState, coordinateSystemService)
+        stakeout = Stakeout(gnssState, coordinateSystemService)
 
         // Feed GNSS position to NtripClient continuously for GGA generation
         CoroutineScope(Dispatchers.Default).launch {

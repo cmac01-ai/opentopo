@@ -7,15 +7,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.opentopo.app.coordinates.CoordinateSystemService
 import org.opentopo.app.db.AppDatabase
 import org.opentopo.app.db.PointEntity
 import org.opentopo.app.gnss.GnssState
 import org.opentopo.transform.GeographicCoordinate
-import org.opentopo.transform.HeposTransform
 import org.opentopo.transform.ProjectedCoordinate
-import java.io.InputStream
 
 /**
  * Manages survey point recording with epoch averaging and quality filtering.
@@ -23,10 +23,8 @@ import java.io.InputStream
 class SurveyManager(
     private val db: AppDatabase,
     private val gnssState: GnssState,
-    gridDeStream: InputStream,
-    gridDnStream: InputStream,
+    private val coordinateSystem: CoordinateSystemService,
 ) {
-    private val transform = HeposTransform(gridDeStream, gridDnStream)
     private val scope = CoroutineScope(Dispatchers.Main)
 
     private val _recordingState = MutableStateFlow(RecordingState())
@@ -35,9 +33,12 @@ class SurveyManager(
     private val _activeProjectId = MutableStateFlow<Long?>(null)
     val activeProjectId: StateFlow<Long?> = _activeProjectId.asStateFlow()
 
-    /** Live EGSA87 coordinates from current GNSS position. */
+    /** Live coordinates in the active project's projected CRS. */
     private val _projectedPosition = MutableStateFlow<ProjectedCoordinate?>(null)
     val projectedPosition: StateFlow<ProjectedCoordinate?> = _projectedPosition.asStateFlow()
+
+    private val _projectedCrsLabel = MutableStateFlow("SIRGAS2000 · UTM")
+    val projectedCrsLabel: StateFlow<String> = _projectedCrsLabel.asStateFlow()
 
     // Active recording mode
     private val _recordingMode = MutableStateFlow("point") // "point", "line", "polygon"
@@ -60,24 +61,35 @@ class SurveyManager(
     var antennaHeight: Double? = null
 
     init {
-        // Continuously transform live position to EGSA87
+        // Re-project whenever the GNSS position or active project CRS changes.
         scope.launch(Dispatchers.Default) {
-            gnssState.position.collect { pos ->
-                _projectedPosition.value = if (pos.hasFix) {
-                    try {
-                        transform.forward(GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0))
-                    } catch (_: Exception) {
-                        null
+            combine(gnssState.position, coordinateSystem.config) { pos, _ -> pos }
+                .collect { pos ->
+                    if (pos.hasFix) {
+                        try {
+                            val projected = coordinateSystem.project(
+                                GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0)
+                            )
+                            _projectedPosition.value = projected.coordinate
+                            _projectedCrsLabel.value = projected.label
+                        } catch (_: Exception) {
+                            _projectedPosition.value = null
+                        }
+                    } else {
+                        _projectedPosition.value = null
                     }
-                } else {
-                    null
                 }
-            }
         }
     }
 
     fun setActiveProject(id: Long?) {
         _activeProjectId.value = id
+        scope.launch(Dispatchers.IO) {
+            val project = id?.let { db.projectDao().getById(it) }
+            if (project != null) {
+                coordinateSystem.setConfig(project.coordinateSystem, project.utmZone)
+            }
+        }
     }
 
     /** Quick-record for FAB: uses active project with full averaging. */
@@ -192,7 +204,9 @@ class SurveyManager(
             if (!pos.hasFix) return@launch
 
             val projected = try {
-                transform.forward(GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0))
+                coordinateSystem.project(
+                    GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0)
+                ).coordinate
             } catch (_: Exception) { null }
 
             val vertexNum = _vertexCount.value + 1
@@ -259,7 +273,7 @@ class SurveyManager(
     suspend fun computePolygonArea(featureId: Long): Double {
         val vertices = db.pointDao().getByFeatureOnce(featureId)
         if (vertices.size < 3) return 0.0
-        // Use EGSA87 projected coordinates for area (meters)
+        // Use coordinates already stored in the project's projected CRS (meters).
         val coords = vertices.mapNotNull { pt ->
             if (pt.easting != null && pt.northing != null) pt.easting to pt.northing else null
         }
@@ -302,9 +316,9 @@ class SurveyManager(
         val avgSats = epochs.map { it.numSatellites }.average().toInt()
         val avgHdop = epochs.mapNotNull { it.hdop }.takeIf { it.isNotEmpty() }?.average()
 
-        val projected = transform.forward(
+        val projected = coordinateSystem.project(
             GeographicCoordinate(avgLat, avgLon, avgAlt ?: 0.0)
-        )
+        ).coordinate
 
         val count = db.pointDao().countByProject(projectId)
         val pointId = "P%03d".format(count + 1)

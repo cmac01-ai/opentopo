@@ -3,10 +3,9 @@ package org.opentopo.app.survey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.opentopo.app.coordinates.CoordinateSystemService
 import org.opentopo.app.gnss.GnssState
 import org.opentopo.transform.GeographicCoordinate
-import org.opentopo.transform.HeposTransform
-import java.io.InputStream
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.sqrt
@@ -21,10 +20,8 @@ class Stakeout(
      * through separate parameters.
      */
     val gnssState: GnssState,
-    gridDeStream: InputStream,
-    gridDnStream: InputStream,
+    private val coordinateSystem: CoordinateSystemService,
 ) {
-    private val transform = HeposTransform(gridDeStream, gridDnStream)
 
     private val _target = MutableStateFlow<StakeoutTarget?>(null)
 
@@ -42,9 +39,9 @@ class Stakeout(
     ) { position, target ->
         if (target == null || !position.hasFix) return@combine null
 
-        val currentProjected = transform.forward(
+        val currentProjected = coordinateSystem.project(
             GeographicCoordinate(position.latitude, position.longitude, position.altitude ?: 0.0)
-        )
+        ).coordinate
 
         val deltaE = target.easting - currentProjected.eastingM
         val deltaN = target.northing - currentProjected.northingM
@@ -67,8 +64,8 @@ class Stakeout(
 
 data class StakeoutTarget(
     val name: String,
-    val easting: Double,      // EGSA87 E
-    val northing: Double,     // EGSA87 N
+    val easting: Double,      // E in the active project's CRS
+    val northing: Double,     // N in the active project's CRS
     val elevation: Double? = null,
 )
 

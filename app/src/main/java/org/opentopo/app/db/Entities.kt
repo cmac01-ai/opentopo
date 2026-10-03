@@ -11,6 +11,10 @@ data class ProjectEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val description: String = "",
+    /** Stored CRS identifier. New Brazilian projects use SIRGAS2000_UTM. */
+    val coordinateSystem: String = "SIRGAS2000_UTM",
+    /** Null means automatic UTM zone derived from longitude. */
+    val utmZone: Int? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 )
@@ -31,11 +35,11 @@ data class PointEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val projectId: Long,
     val pointId: String,           // user-visible auto-incrementing ID (e.g., "P001")
-    val latitude: Double,          // WGS84
-    val longitude: Double,         // WGS84
+    val latitude: Double,          // geographic latitude from GNSS
+    val longitude: Double,         // geographic longitude from GNSS
     val altitude: Double?,         // ellipsoidal height (m)
-    val easting: Double?,          // EGSA87 E
-    val northing: Double?,         // EGSA87 N
+    val easting: Double?,          // projected E in the project's CRS
+    val northing: Double?,         // projected N in the project's CRS
     val horizontalAccuracy: Double?,
     val verticalAccuracy: Double?,
     val fixQuality: Int,           // 0=none, 1=GPS, 2=DGPS, 4=RTK fix, 5=RTK float
