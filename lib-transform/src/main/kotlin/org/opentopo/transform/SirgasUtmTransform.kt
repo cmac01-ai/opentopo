@@ -22,7 +22,7 @@ data class SirgasUtmCoordinate(
  * SIRGAS2000 geographic <-> UTM conversion using the GRS80 ellipsoid.
  *
  * Brazil is covered by UTM zones 18-25 in the southern hemisphere and
- * zones 18-23 in the northern hemisphere. EPSG codes are returned for
+ * zones 18-22 in the northern hemisphere. EPSG codes are returned for
  * those official SIRGAS2000 / UTM CRS definitions.
  */
 object SirgasUtmTransform {
