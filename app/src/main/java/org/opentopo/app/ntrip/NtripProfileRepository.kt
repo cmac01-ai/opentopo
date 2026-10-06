@@ -61,59 +61,64 @@ class NtripProfileRepository(
         }
     }
 
-    /** One-shot seed for a fresh install or migration. Idempotent. */
+    /**
+     * Seed/migrate NTRIP profiles for the Brazilian build.
+     *
+     * Removes only the three stock Greek templates from older OpenTopo builds;
+     * user-created profiles are preserved. Ensures an IBGE RBMC-IP template is
+     * always available without storing credentials.
+     */
     suspend fun seedIfEmpty() {
-        if (dao.count() > 0) return
+        val now = System.currentTimeMillis()
 
-        // Migrate the user's old single DataStore-backed NtripConfig into a
-        // live profile, if it has anything interesting in it.
+        listOf(
+            "rtk.hepos.gr",
+            "civilpos.gr",
+            "ntrip.smartnet-eu.com",
+        ).forEach { legacyHost ->
+            dao.deleteByHost(legacyHost)
+        }
+
         val legacyHost = prefs.ntripHostOnce()
         val legacyUsername = prefs.ntripUsernameOnce()
         val legacyMountpoint = prefs.ntripMountpointOnce()
 
-        val now = System.currentTimeMillis()
-        val migrated = if (legacyHost.isNotBlank() || legacyUsername.isNotBlank()) {
+        if (dao.count() == 0 && (legacyHost.isNotBlank() || legacyUsername.isNotBlank())) {
             val name = when {
-                legacyHost.contains("hepos", ignoreCase = true) -> "HEPOS · Nationwide VRS"
-                legacyHost.contains("civilpos", ignoreCase = true) -> "CivilPOS · Metropolitan"
-                legacyHost.contains("smartnet", ignoreCase = true) -> "SmartNet · Greek mainland"
+                legacyHost == "170.84.40.52" -> "IBGE · RBMC-IP"
+                legacyHost.contains("ibge", ignoreCase = true) -> "IBGE · RBMC-IP"
                 legacyHost.isNotBlank() -> legacyHost.substringBefore('.').replaceFirstChar { it.uppercaseChar() }
-                else -> "Saved profile"
+                else -> "Perfil salvo"
             }
             val code = NtripBadgePalette.deriveCode(name)
             val (bg, fg) = NtripBadgePalette.forCode(code)
-            NtripProfile(
-                id = UUID.randomUUID().toString(),
-                displayName = name,
-                code = code,
-                tintColor = bg,
-                badgeFgColor = fg,
-                host = legacyHost,
-                port = prefs.ntripPortOnce().toIntOrNull() ?: 2101,
-                username = legacyUsername,
-                password = prefs.ntripPasswordOnce(),
-                mountpoint = legacyMountpoint,
-                isActive = true,
-                lastUsedAt = now,
-                createdAt = now,
+            dao.upsert(
+                NtripProfile(
+                    id = UUID.randomUUID().toString(),
+                    displayName = name,
+                    code = code,
+                    tintColor = bg,
+                    badgeFgColor = fg,
+                    host = legacyHost,
+                    port = prefs.ntripPortOnce().toIntOrNull() ?: 2101,
+                    username = legacyUsername,
+                    password = prefs.ntripPasswordOnce(),
+                    mountpoint = legacyMountpoint,
+                    isActive = true,
+                    lastUsedAt = now,
+                    createdAt = now,
+                )
             )
-        } else null
+        }
 
-        // Shipping seed templates (no credentials yet).
-        val templates = listOf(
-            seedTemplate("HEPOS · Nationwide VRS", "rtk.hepos.gr", now),
-            seedTemplate("CivilPOS · Metropolitan", "civilpos.gr", now),
-            seedTemplate("SmartNet · Greek mainland", "ntrip.smartnet-eu.com", now),
-        )
-
-        if (migrated != null) {
-            dao.upsert(migrated)
-            // Avoid duplicating the migrated host in templates.
-            templates
-                .filter { !it.host.equals(migrated.host, ignoreCase = true) }
-                .forEach { dao.upsert(it) }
-        } else {
-            templates.forEach { dao.upsert(it) }
+        if (dao.getByHost("170.84.40.52") == null) {
+            dao.upsert(
+                seedTemplate(
+                    name = "IBGE · RBMC-IP",
+                    host = "170.84.40.52",
+                    now = now,
+                )
+            )
         }
     }
 

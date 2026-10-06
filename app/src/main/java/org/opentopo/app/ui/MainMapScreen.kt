@@ -758,22 +758,19 @@ fun MainMapScreen(
         },
     ) { paddingValues ->
         // ── Map fills the screen ──
-        var orthoVisible by remember { mutableStateOf(false) }
-        var contoursVisible by remember { mutableStateOf(true) }
-
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             AndroidView(
                 factory = { ctx ->
                     MapView(ctx).apply {
                         getMapAsync { map ->
-                            // Load vathra.xyz vector basemap style from assets
-                            val styleJson = ctx.assets.open("style_vathra.json")
+                            // Brazilian build: neutral OpenStreetMap raster basemap.
+                            val styleJson = ctx.assets.open("style_brazil.json")
                                 .bufferedReader().readText()
                             map.setStyle(
                                 org.maplibre.android.maps.Style.Builder()
                                     .fromJson(styleJson),
                             ) { style ->
-                                // Initial camera: try to use last known GPS, fallback to Greece center
+                                // Initial camera: try to use last known GPS, fallback to Brazil overview
                                 val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE) as? android.location.LocationManager
                                 val lastLoc = try {
                                     if (androidx.core.content.ContextCompat.checkSelfPermission(
@@ -787,7 +784,7 @@ fun MainMapScreen(
                                 val (initLat, initLng, initZoom) = if (lastLoc != null) {
                                     Triple(lastLoc.latitude, lastLoc.longitude, 15.0)
                                 } else {
-                                    Triple(38.5, 23.8, 7.0)
+                                    Triple(-14.235, -51.925, 4.0)
                                 }
                                 map.cameraPosition = CameraPosition.Builder()
                                     .target(LatLng(initLat, initLng)).zoom(initZoom).build()
@@ -801,7 +798,7 @@ fun MainMapScreen(
                                 // Add user location source + layers
                                 val locationSource = GeoJsonSource(
                                     "user-location",
-                                    Point.fromLngLat(23.8, 38.5),
+                                    Point.fromLngLat(-51.925, -14.235),
                                 )
                                 style.addSource(locationSource)
 
@@ -963,23 +960,6 @@ fun MainMapScreen(
                                     "survey-polygons-layer",
                                 )
 
-                                // Prepare Ktimatologio orthophoto WMS as hidden raster source
-                                val ktimaSource = RasterSource(
-                                    "ktima-ortho",
-                                    TileSet(
-                                        "2.2.0",
-                                        "http://gis.ktimanet.gr/wms/wmsopen/wmsserver.aspx?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=BASEMAP&SRS=EPSG:900913&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg",
-                                    ),
-                                    256,
-                                )
-                                style.addSource(ktimaSource)
-                                style.addLayerBelow(
-                                    RasterLayer("ktima-ortho-layer", "ktima-ortho")
-                                        .withProperties(
-                                            PropertyFactory.visibility(org.maplibre.android.style.layers.Property.NONE),
-                                        ),
-                                    "survey-polygons-layer",  // below all survey layers
-                                )
 
                             }
                             // Load trig points on camera idle
@@ -1130,14 +1110,6 @@ fun MainMapScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Trig Points (GYS)") },
-                            leadingIcon = { Icon(Icons.Outlined.PinDrop, null) },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                sheetMode = SheetMode.TRIG
-                            },
-                        )
-                        DropdownMenuItem(
                             text = { Text("More") },
                             leadingIcon = { Icon(Icons.Outlined.Tune, null) },
                             onClick = {
@@ -1151,64 +1123,6 @@ fun MainMapScreen(
                             onClick = {
                                 overflowMenuExpanded = false
                                 sheetMode = SheetMode.EXPORT
-                            },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("Layer: Ortho") },
-                            leadingIcon = {
-                                if (orthoVisible) Icon(Icons.Filled.Check, null, Modifier.size(18.dp))
-                                else Icon(Icons.Outlined.Layers, null, Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                orthoVisible = !orthoVisible
-                                val newVis = if (orthoVisible)
-                                    org.maplibre.android.style.layers.Property.VISIBLE
-                                else
-                                    org.maplibre.android.style.layers.Property.NONE
-                                mapRef?.style?.getLayer("ktima-ortho-layer")?.setProperties(
-                                    PropertyFactory.visibility(newVis),
-                                )
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Layer: Contours") },
-                            leadingIcon = {
-                                if (contoursVisible) Icon(Icons.Filled.Check, null, Modifier.size(18.dp))
-                                else Icon(Icons.Outlined.Layers, null, Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                contoursVisible = !contoursVisible
-                                val newVis = if (contoursVisible)
-                                    org.maplibre.android.style.layers.Property.VISIBLE
-                                else
-                                    org.maplibre.android.style.layers.Property.NONE
-                                mapRef?.style?.getLayer("contours-lines")?.setProperties(PropertyFactory.visibility(newVis))
-                                mapRef?.style?.getLayer("contours-labels")?.setProperties(PropertyFactory.visibility(newVis))
-                            },
-                        )
-                        HorizontalDivider()
-                        // Trig points are an *overlay*, not a basemap layer — they sit
-                        // on top of whichever layer combo (ortho / contours / both) the
-                        // user has active. Separated from the "Layer:" items visually
-                        // to make that clear.
-                        DropdownMenuItem(
-                            text = { Text("Show Trig Points (GYS)") },
-                            leadingIcon = {
-                                if (trigPointsVisible) Icon(Icons.Filled.Check, null, Modifier.size(18.dp))
-                                else Icon(Icons.Outlined.PinDrop, null, Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                trigPointsVisible = !trigPointsVisible
-                                val newVis = if (trigPointsVisible)
-                                    org.maplibre.android.style.layers.Property.VISIBLE
-                                else
-                                    org.maplibre.android.style.layers.Property.NONE
-                                mapRef?.style?.getLayer("trig-points-circle")?.setProperties(PropertyFactory.visibility(newVis))
-                                mapRef?.style?.getLayer("trig-points-labels")?.setProperties(PropertyFactory.visibility(newVis))
                             },
                         )
                     }
@@ -1630,11 +1544,11 @@ fun MainMapScreen(
                 ToolsPanel(
                     db = db,
                     surveyManager = surveyManager,
-                    transform = heposTransform,
                     onOpenCoordConverter = { transformScreenOpen = true },
-                    onOpenGysSearch = {
+                    onOpenRbmc = {
                         moreScreenOpen = false
-                        sheetMode = SheetMode.TRIG
+                        sheetMode = SheetMode.CONNECTION
+                        ntripSwitchSheetOpen = true
                     },
                     onOpenImport = {
                         moreScreenOpen = false
@@ -1649,11 +1563,10 @@ fun MainMapScreen(
                         sheetMode = SheetMode.SURVEY
                         android.widget.Toast.makeText(
                             context,
-                            "Switch to Polygon mode in Survey to see live area + perimeter",
+                            "Use o modo Polígono em Levantamento para área e perímetro.",
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     },
-                    onOpenTransformPipeline = { transformScreenOpen = true },
                     onOpenSettings = { settingsScreenOpen = true },
                     onOpenRecentActivity = {
                         moreScreenOpen = false
@@ -1662,7 +1575,7 @@ fun MainMapScreen(
                     onOpenWhatsNew = {
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/CHANGELOG.md"),
+                            android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/sirgas2000-brazil/CHANGELOG.md"),
                         )
                         context.startActivity(intent)
                     },
@@ -1706,34 +1619,34 @@ fun MainMapScreen(
             onSourceCodeClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo"),
                 )
                 context.startActivity(intent)
             },
             onDocsClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/README.md"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/main/README.md"),
                 )
                 context.startActivity(intent)
             },
             onPrivacyClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/PRIVACY_POLICY.md"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/main/PRIVACY_POLICY.md"),
                 )
                 context.startActivity(intent)
             },
             onWhatsNewClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/CHANGELOG.md"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/main/CHANGELOG.md"),
                 )
                 context.startActivity(intent)
             },
             onContactClick = {
                 val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
-                    data = android.net.Uri.parse("mailto:pierros@papadeas.gr")
+                    data = android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/issues")
                 }
                 context.startActivity(intent)
             },
@@ -1750,7 +1663,7 @@ fun MainMapScreen(
     // Transform pipeline inspector — full-screen overlay wrapping the existing
     // TransformPanel with a back button. This replaces the transform inspector
     // that used to live inline in ToolsPanel before the v2.0 More-Hub rewrite.
-    if (transformScreenOpen && heposTransform != null) {
+    if (transformScreenOpen) {
         androidx.activity.compose.BackHandler(enabled = true) {
             transformScreenOpen = false
         }
@@ -1796,7 +1709,7 @@ fun MainMapScreen(
                         )
                     }
                 }
-                TransformPanel(transform = heposTransform)
+                TransformPanel()
             }
         }
     }
@@ -1999,58 +1912,30 @@ private fun NewProjectHeaderDialog(
                 tint = MaterialTheme.colorScheme.primary,
             )
         },
-        title = { Text("New Project") },
+        title = { Text("Novo projeto") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 androidx.compose.material3.OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name") },
+                    label = { Text("Nome") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 androidx.compose.material3.OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
+                    label = { Text("Descrição") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                var crsExpanded by remember { mutableStateOf(false) }
-                Box {
-                    TextButton(onClick = { crsExpanded = true }) {
-                        Text(
-                            if (coordinateSystem == "SIRGAS2000_UTM")
-                                "SIRGAS2000 / UTM"
-                            else
-                                "EGSA87 / EPSG:2100"
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = crsExpanded,
-                        onDismissRequest = { crsExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("SIRGAS2000 / UTM") },
-                            onClick = {
-                                coordinateSystem = "SIRGAS2000_UTM"
-                                crsExpanded = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("EGSA87 / EPSG:2100 (legacy)") },
-                            onClick = {
-                                coordinateSystem = "EGSA87"
-                                utmZone = null
-                                utmHemisphere = "AUTO"
-                                crsExpanded = false
-                            },
-                        )
-                    }
-                }
+                Text(
+                    "Sistema: SIRGAS2000 / UTM",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
 
-                if (coordinateSystem == "SIRGAS2000_UTM") {
                     var hemisphereExpanded by remember { mutableStateOf(false) }
                     Box {
                         TextButton(onClick = { hemisphereExpanded = true }) {
@@ -2121,7 +2006,6 @@ private fun NewProjectHeaderDialog(
                             }
                         }
                     }
-                }
             }
         },
         confirmButton = {
@@ -2144,12 +2028,12 @@ private fun NewProjectHeaderDialog(
                 },
                 enabled = name.isNotBlank(),
             ) {
-                Text("Create")
+                Text("Criar")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancelar")
             }
         },
     )

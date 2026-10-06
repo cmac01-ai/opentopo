@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.Flow
 @Entity(tableName = "ntrip_profile")
 data class NtripProfile(
     @PrimaryKey val id: String,
-    /** User-visible name, e.g. "HEPOS · Nationwide VRS". */
+    /** User-visible name, e.g. "IBGE · RBMC-IP". */
     val displayName: String,
     /**
      * Two-letter badge code, auto-derived from displayName initials but editable.
@@ -79,6 +79,12 @@ interface NtripProfileDao {
 
     @Query("SELECT * FROM ntrip_profile WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): NtripProfile?
+
+    @Query("SELECT * FROM ntrip_profile WHERE host = :host LIMIT 1")
+    suspend fun getByHost(host: String): NtripProfile?
+
+    @Query("DELETE FROM ntrip_profile WHERE host = :host")
+    suspend fun deleteByHost(host: String)
 
     @Query("SELECT COUNT(*) FROM ntrip_profile")
     suspend fun count(): Int

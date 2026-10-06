@@ -1,398 +1,274 @@
 package org.opentopo.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Calculate
-import androidx.compose.material.icons.outlined.GridOn
-import androidx.compose.material.icons.outlined.Landscape
-import androidx.compose.material.icons.outlined.SwapVert
-import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import org.opentopo.app.ui.theme.CoordinateFont
 import org.opentopo.transform.GeographicCoordinate
-import org.opentopo.transform.HeposTransform
-import org.opentopo.transform.TransformResult
+import org.opentopo.transform.SirgasUtmCoordinate
+import org.opentopo.transform.SirgasUtmTransform
+import org.opentopo.transform.UtmHemisphere
 
 @Composable
-fun TransformPanel(
-    transform: HeposTransform?,
-    modifier: Modifier = Modifier,
-) {
-    val activity = LocalContext.current as? org.opentopo.app.MainActivity
-    val prefs = activity?.prefs
-    val preferReceiverGeoid by prefs?.preferReceiverGeoid?.collectAsState(initial = false)
-        ?: remember { mutableStateOf(false) }
-
+fun TransformPanel(modifier: Modifier = Modifier) {
     var latInput by remember { mutableStateOf("") }
     var lonInput by remember { mutableStateOf("") }
     var heightInput by remember { mutableStateOf("0.0") }
-    var result by remember { mutableStateOf<TransformResult?>(null) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
-    var showPipeline by remember { mutableStateOf(false) }
+    var zoneOverride by remember { mutableStateOf<Int?>(null) }
+    var hemisphereMode by remember { mutableStateOf("AUTO") }
+    var forwardResult by remember { mutableStateOf<SirgasUtmCoordinate?>(null) }
+    var forwardError by remember { mutableStateOf<String?>(null) }
+
+    var eastingInput by remember { mutableStateOf("") }
+    var northingInput by remember { mutableStateOf("") }
+    var inverseZone by remember { mutableStateOf(23) }
+    var inverseHemisphere by remember { mutableStateOf(UtmHemisphere.SOUTH) }
+    var inverseResult by remember { mutableStateOf<GeographicCoordinate?>(null) }
+    var inverseError by remember { mutableStateOf<String?>(null) }
 
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // ── Converter ──
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.medium,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "WGS84 \u2192 EGSA87 (EPSG:2100)",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+        Text("Conversor SIRGAS2000 / UTM", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Elipsoide GRS80 · fusos brasileiros 18–25S e 18–22N",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Geográficas → UTM", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
-                        value = latInput,
-                        onValueChange = { latInput = it },
-                        label = { Text("Latitude") },
-                        placeholder = { Text("38.0000") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
+                        value = latInput, onValueChange = { latInput = it },
+                        label = { Text("Latitude") }, modifier = Modifier.weight(1f), singleLine = true,
                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = CoordinateFont),
                     )
                     OutlinedTextField(
-                        value = lonInput,
-                        onValueChange = { lonInput = it },
-                        label = { Text("Longitude") },
-                        placeholder = { Text("23.0000") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
+                        value = lonInput, onValueChange = { lonInput = it },
+                        label = { Text("Longitude") }, modifier = Modifier.weight(1f), singleLine = true,
                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = CoordinateFont),
                     )
                 }
                 OutlinedTextField(
-                    value = heightInput,
-                    onValueChange = { heightInput = it },
-                    label = { Text("Height (m)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+                    value = heightInput, onValueChange = { heightInput = it },
+                    label = { Text("Altura (m)") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = CoordinateFont),
                 )
-                var geoidSepInput by remember { mutableStateOf("") }
-                OutlinedTextField(
-                    value = geoidSepInput,
-                    onValueChange = { geoidSepInput = it },
-                    label = { Text("Geoid N (m)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = CoordinateFont),
-                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    var hemiExpanded by remember { mutableStateOf(false) }
+                    Box(Modifier.weight(1f)) {
+                        TextButton(onClick = { hemiExpanded = true }) {
+                            Text(when (hemisphereMode) {
+                                "NORTH" -> "Norte"
+                                "SOUTH" -> "Sul"
+                                else -> "Hemisfério auto"
+                            })
+                        }
+                        DropdownMenu(expanded = hemiExpanded, onDismissRequest = { hemiExpanded = false }) {
+                            listOf("AUTO" to "Automático", "NORTH" to "Norte", "SOUTH" to "Sul").forEach { (value, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        hemisphereMode = value
+                                        if (value == "NORTH" && (zoneOverride ?: 18) > 22) zoneOverride = null
+                                        hemiExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    var zoneExpanded by remember { mutableStateOf(false) }
+                    Box(Modifier.weight(1f)) {
+                        TextButton(onClick = { zoneExpanded = true }) {
+                            Text(zoneOverride?.let { "Fuso $it" } ?: "Fuso auto")
+                        }
+                        DropdownMenu(expanded = zoneExpanded, onDismissRequest = { zoneExpanded = false }) {
+                            DropdownMenuItem(text = { Text("Automático") }, onClick = {
+                                zoneOverride = null
+                                zoneExpanded = false
+                            })
+                            val zones = if (hemisphereMode == "NORTH") 18..22 else 18..25
+                            zones.forEach { zone ->
+                                DropdownMenuItem(text = { Text("Fuso $zone") }, onClick = {
+                                    zoneOverride = zone
+                                    zoneExpanded = false
+                                })
+                            }
+                        }
+                    }
+                }
+
                 FilledTonalButton(
                     onClick = {
-                        val lat = latInput.toDoubleOrNull()
-                        val lon = lonInput.toDoubleOrNull()
-                        val h = heightInput.toDoubleOrNull() ?: 0.0
-                        if (lat != null && lon != null && transform != null) {
-                            try {
-                                result = transform.forwardDetailed(
-                                    GeographicCoordinate(lat, lon, h),
-                                    geoidSeparation = geoidSepInput.toDoubleOrNull(),
-                                    preferReceiverGeoid = preferReceiverGeoid,
-                                )
-                                errorMsg = null
-                                showPipeline = true
-                            } catch (e: Exception) {
-                                errorMsg = e.message ?: "Transform failed"
-                                result = null
-                            }
+                        val lat = latInput.replace(',', '.').toDoubleOrNull()
+                        val lon = lonInput.replace(',', '.').toDoubleOrNull()
+                        val h = heightInput.replace(',', '.').toDoubleOrNull() ?: 0.0
+                        if (lat == null || lon == null) {
+                            forwardError = "Informe latitude e longitude válidas."
+                            forwardResult = null
                         } else {
-                            errorMsg = "Enter valid lat/lon"
+                            try {
+                                val hemi = when (hemisphereMode) {
+                                    "NORTH" -> UtmHemisphere.NORTH
+                                    "SOUTH" -> UtmHemisphere.SOUTH
+                                    else -> null
+                                }
+                                forwardResult = SirgasUtmTransform.forward(
+                                    coordinate = GeographicCoordinate(lat, lon, h),
+                                    zoneOverride = zoneOverride,
+                                    hemisphereOverride = hemi,
+                                )
+                                forwardError = null
+                            } catch (e: Exception) {
+                                forwardError = e.message
+                                forwardResult = null
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(percent = 50),
-                ) {
-                    Icon(Icons.Outlined.SwapVert, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Transform")
-                }
+                ) { Text("Converter para UTM") }
 
-                errorMsg?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-
-        // ── Result ──
-        result?.let { r ->
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("EGSA87 Result", style = MaterialTheme.typography.titleSmall)
-                    CoordRow("Easting", "%.3f m".format(r.output.eastingM))
-                    CoordRow("Northing", "%.3f m".format(r.output.northingM))
-                }
-            }
-        }
-
-        // ── Pipeline Details ──
-        if (showPipeline && result != null) {
-            val r = result!!
-
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Outlined.Timeline, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        Text("Pipeline Steps", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                    }
-
-                    PipelineStep("1. Input (WGS84/HTRS07)") {
-                        CoordRow("Lat", "%.8f\u00B0".format(r.input.latitudeDeg))
-                        CoordRow("Lon", "%.8f\u00B0".format(r.input.longitudeDeg))
-                        CoordRow("Height", "%.3f m".format(r.input.heightM))
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    PipelineStep("2. Cartesian (HTRS07)") {
-                        CoordRow("X", "%.3f m".format(r.cartesianHtrs07.x))
-                        CoordRow("Y", "%.3f m".format(r.cartesianHtrs07.y))
-                        CoordRow("Z", "%.3f m".format(r.cartesianHtrs07.z))
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    PipelineStep("3. Helmert \u2192 Cartesian (EGSA87)") {
-                        CoordRow("X", "%.3f m".format(r.cartesianEgsa87.x))
-                        CoordRow("Y", "%.3f m".format(r.cartesianEgsa87.y))
-                        CoordRow("Z", "%.3f m".format(r.cartesianEgsa87.z))
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    PipelineStep("4. Geographic (EGSA87)") {
-                        CoordRow("Lat", "%.8f\u00B0".format(r.geographicEgsa87.latitudeDeg))
-                        CoordRow("Lon", "%.8f\u00B0".format(r.geographicEgsa87.longitudeDeg))
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    PipelineStep("5. TM87 (approx EGSA87)") {
-                        CoordRow("E", "%.3f m".format(r.tm87.eastingM))
-                        CoordRow("N", "%.3f m".format(r.tm87.northingM))
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    PipelineStep("6. TM07 (grid lookup)") {
-                        CoordRow("E", "%.3f m".format(r.tm07.eastingM))
-                        CoordRow("N", "%.3f m".format(r.tm07.northingM))
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    PipelineStep("7. Grid Corrections") {
-                        CoordRow("\u0394E", "%.2f cm".format(r.gridCorrectionDeCm))
-                        CoordRow("\u0394N", "%.2f cm".format(r.gridCorrectionDnCm))
-                    }
-
-                    r.geoidUndulation?.let { n ->
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        PipelineStep("8. Geoid Undulation") {
-                            CoordRow("N (geoid)", "%.3f m".format(n))
-                            CoordRow("h (ellipsoidal)", "%.3f m".format(r.input.heightM))
-                            r.orthometricHeight?.let { h ->
-                                CoordRow("H (orthometric)", "%.3f m".format(h))
-                            }
+                forwardError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                forwardResult?.let { result ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "SIRGAS2000 · UTM ${result.zone}${result.hemisphere.code}" +
+                                    (result.epsg?.let { " · EPSG $it" } ?: ""),
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                            Text("E  ${"%.3f".format(result.eastingM)} m", fontFamily = CoordinateFont)
+                            Text("N  ${"%.3f".format(result.northingM)} m", fontFamily = CoordinateFont)
                         }
                     }
                 }
             }
         }
 
-        // ── Helmert Parameters ──
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.medium,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "HELMERT PARAMETERS",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text("HTRS07 \u2192 EGSA87 (Position Vector)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(4.dp))
-                CoordRow("TX", "203.437 m")
-                CoordRow("TY", "\u221273.461 m")
-                CoordRow("TZ", "\u2212243.594 m")
-                CoordRow("RX", "\u22120.170\"")
-                CoordRow("RY", "\u22120.060\"")
-                CoordRow("RZ", "\u22120.151\"")
-                CoordRow("Scale", "\u22120.294 ppm")
-            }
-        }
-
-        // ── TM Projection Parameters ──
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.medium,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "PROJECTION PARAMETERS",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text("TM87 (EGSA87 output)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                CoordRow("Central meridian", "24\u00B0")
-                CoordRow("Scale factor", "0.9996")
-                CoordRow("False Easting", "500,000 m")
-                CoordRow("False Northing", "0 m")
-                CoordRow("Ellipsoid", "GRS80")
-                Spacer(Modifier.height(8.dp))
-                Text("TM07 (grid lookup)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                CoordRow("Central meridian", "24\u00B0")
-                CoordRow("Scale factor", "0.9996")
-                CoordRow("False Easting", "500,000 m")
-                CoordRow("False Northing", "\u22122,000,000 m")
-            }
-        }
-
-        // ── Grid Info ──
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.medium,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Outlined.GridOn, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                    Text("CORRECTION GRIDS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                }
-                Spacer(Modifier.height(4.dp))
-                CoordRow("Version", "V1.0 (2km)")
-                CoordRow("Grid size", "408 \u00D7 422 nodes")
-                CoordRow("Cell size", "2,000 m")
-                CoordRow("Easting range", "41,600 \u2013 883,600 m (TM07)")
-                CoordRow("Northing range", "1,845,619 \u2013 2,659,619 m (TM07)")
-                CoordRow("Files", "dE_2km_V1-0.grd, dN_2km_V1-0.grd")
-                CoordRow("Source", "Ktimatologio S.A.")
-                if (transform == null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Grid files not loaded \u2014 transformation unavailable",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("UTM → Geográficas", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = eastingInput, onValueChange = { eastingInput = it },
+                        label = { Text("Easting") }, modifier = Modifier.weight(1f), singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = CoordinateFont),
+                    )
+                    OutlinedTextField(
+                        value = northingInput, onValueChange = { northingInput = it },
+                        label = { Text("Northing") }, modifier = Modifier.weight(1f), singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = CoordinateFont),
                     )
                 }
-            }
-        }
 
-        // ── Geoid Grid Info ──
-        val geoidMeta = transform?.geoidGridMetadata
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = MaterialTheme.shapes.medium,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Outlined.Landscape, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                    Text("GEOID GRID", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    var invZoneExpanded by remember { mutableStateOf(false) }
+                    Box(Modifier.weight(1f)) {
+                        TextButton(onClick = { invZoneExpanded = true }) { Text("Fuso $inverseZone") }
+                        DropdownMenu(expanded = invZoneExpanded, onDismissRequest = { invZoneExpanded = false }) {
+                            val zones = if (inverseHemisphere == UtmHemisphere.NORTH) 18..22 else 18..25
+                            zones.forEach { zone ->
+                                DropdownMenuItem(text = { Text("Fuso $zone") }, onClick = {
+                                    inverseZone = zone
+                                    invZoneExpanded = false
+                                })
+                            }
+                        }
+                    }
+
+                    var invHemiExpanded by remember { mutableStateOf(false) }
+                    Box(Modifier.weight(1f)) {
+                        TextButton(onClick = { invHemiExpanded = true }) {
+                            Text(if (inverseHemisphere == UtmHemisphere.NORTH) "Norte" else "Sul")
+                        }
+                        DropdownMenu(expanded = invHemiExpanded, onDismissRequest = { invHemiExpanded = false }) {
+                            DropdownMenuItem(text = { Text("Norte") }, onClick = {
+                                inverseHemisphere = UtmHemisphere.NORTH
+                                if (inverseZone > 22) inverseZone = 22
+                                invHemiExpanded = false
+                            })
+                            DropdownMenuItem(text = { Text("Sul") }, onClick = {
+                                inverseHemisphere = UtmHemisphere.SOUTH
+                                invHemiExpanded = false
+                            })
+                        }
+                    }
                 }
-                Spacer(Modifier.height(4.dp))
-                if (geoidMeta != null) {
-                    CoordRow("Version", "HEPOS07")
-                    CoordRow("Grid size", "${geoidMeta.nRows} \u00D7 ${geoidMeta.nCols} nodes")
-                    CoordRow("Cell size", "%,.0f m".format(geoidMeta.cellSizeM))
-                    CoordRow(
-                        "Easting range",
-                        "%,.0f \u2013 %,.0f m (TM07)".format(geoidMeta.swEastingM, geoidMeta.neEastingM),
-                    )
-                    CoordRow(
-                        "Northing range",
-                        "%,.0f \u2013 %,.0f m (TM07)".format(geoidMeta.swNorthingM, geoidMeta.neNorthingM),
-                    )
-                    CoordRow("File", "geoid_hepos07.grd")
-                    CoordRow("Source", "Ktimatologio / NTUA")
-                    CoordRow("Licence", "CC BY-NC-SA 3.0 + GPLv3")
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Active source for H = h \u2212 N: " + if (preferReceiverGeoid)
-                            "Receiver EGM96 (fallback: HEPOS07)"
-                        else
-                            "Greek HEPOS07 (fallback: receiver EGM96)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "Change in Config \u2192 Display \u2192 Geoid source",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                } else {
-                    Text(
-                        "Greek geoid grid not loaded \u2014 H uses receiver EGM96 if available",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+
+                FilledTonalButton(
+                    onClick = {
+                        val e = eastingInput.replace(',', '.').toDoubleOrNull()
+                        val n = northingInput.replace(',', '.').toDoubleOrNull()
+                        if (e == null || n == null) {
+                            inverseError = "Informe Easting e Northing válidos."
+                            inverseResult = null
+                        } else {
+                            try {
+                                inverseResult = SirgasUtmTransform.inverse(
+                                    SirgasUtmCoordinate(
+                                        eastingM = e, northingM = n, zone = inverseZone,
+                                        hemisphere = inverseHemisphere,
+                                    )
+                                )
+                                inverseError = null
+                            } catch (ex: Exception) {
+                                inverseError = ex.message
+                                inverseResult = null
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Converter para latitude/longitude") }
+
+                inverseError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                inverseResult?.let { result ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("SIRGAS2000", style = MaterialTheme.typography.labelLarge)
+                            Text("Lat  ${"%.9f".format(result.latitudeDeg)}°", fontFamily = CoordinateFont)
+                            Text("Lon  ${"%.9f".format(result.longitudeDeg)}°", fontFamily = CoordinateFont)
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun PipelineStep(label: String, content: @Composable () -> Unit) {
-    Column {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        content()
-    }
-}
-
-@Composable
-private fun CoordRow(label: String, value: String) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(
-            value,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = CoordinateFont,
-            fontWeight = FontWeight.Bold,
-        )
+        Spacer(Modifier.height(8.dp))
     }
 }

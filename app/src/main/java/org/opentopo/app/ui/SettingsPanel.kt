@@ -228,7 +228,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                     headlineContent = { Text("Coordinates") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
-                        val formatLabels = listOf("EGSA87 (E/N)", "WGS84 Decimal", "WGS84 DMS")
+                        val formatLabels = listOf("SIRGAS2000 / UTM", "SIRGAS2000 Decimal", "Graus/min/seg")
                         Box {
                             TextButton(onClick = { expanded = true }) {
                                 Text(formatLabels.getOrElse(coordFormat) { formatLabels[0] })
@@ -253,29 +253,19 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                     headlineContent = { Text("Geoid source") },
                     supportingContent = {
                         Text(
-                            if (preferReceiverGeoid)
-                                "Receiver EGM96 (GGA geoid separation)"
-                            else
-                                "Greek HEPOS07 grid (recommended)",
+                            "Receptor GNSS (NMEA GGA) · hgeoHNOR2020 em etapa futura",
                         )
                     },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
                             TextButton(onClick = { expanded = true }) {
-                                Text(if (preferReceiverGeoid) "Receiver" else "Greek")
+                                Text("Receptor")
                                 Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
                             }
                             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                                 DropdownMenuItem(
-                                    text = { Text("Greek HEPOS07") },
-                                    onClick = {
-                                        scope.launch { prefs?.setPreferReceiverGeoid(false) }
-                                        expanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Receiver EGM96") },
+                                    text = { Text("Receptor GNSS / NMEA GGA") },
                                     onClick = {
                                         scope.launch { prefs?.setPreferReceiverGeoid(true) }
                                         expanded = false
@@ -323,16 +313,14 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 Text("Developed by Pierros Papadeas", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(4.dp))
 
-                Text("Transformation engine", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("HEPOS parameters: Ktimatologio S.A.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Correction grids: dE/dN V1.0 (2km), Ktimatologio S.A.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("Sistema geodésico", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("SIRGAS2000 / UTM · elipsoide GRS80", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("Fusos brasileiros: 18–25S e 18–22N", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
 
                 Spacer(Modifier.height(4.dp))
-                Text("Map data", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Basemap: OpenStreetMap contributors (via vathra.xyz)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Orthophoto: Hellenic Cadastre (Ktimatologio)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Contours: SRTM elevation data (via vathra.xyz)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Trig points: Hellenic Army Geographical Service (GYS) via vathra.xyz", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("Dados e serviços", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Mapa: OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("NTRIP: compatível com RBMC-IP / IBGE", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
 
                 Spacer(Modifier.height(4.dp))
                 Text("Libraries", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -41,7 +41,6 @@ import org.opentopo.app.survey.Stakeout
 import org.opentopo.app.survey.SurveyManager
 import org.opentopo.app.ui.MainMapScreen
 import org.opentopo.app.ui.theme.OpenTopoTheme
-import org.opentopo.app.survey.TrigPointService
 
 class MainActivity : ComponentActivity() {
 
@@ -60,10 +59,7 @@ class MainActivity : ComponentActivity() {
         private set
     private var surveyManager: SurveyManager? = null
     private var stakeout: Stakeout? = null
-    private var heposTransform: org.opentopo.transform.HeposTransform? = null
     private lateinit var coordinateSystemService: org.opentopo.app.coordinates.CoordinateSystemService
-    lateinit var trigPointService: TrigPointService
-        private set
 
     /** True when the activity is in picture-in-picture mode. */
     private val _isInPipMode = MutableStateFlow(false)
@@ -99,7 +95,6 @@ class MainActivity : ComponentActivity() {
 
         db = AppDatabase.getInstance(this)
         prefs = org.opentopo.app.prefs.UserPreferences(this)
-        trigPointService = TrigPointService(db.trigPointCacheDao())
         bluetoothService = BluetoothGnssService(this, gnssState)
         usbService = UsbGnssService(this, gnssState)
         internalService = InternalGnssService(this, gnssState)
@@ -135,24 +130,13 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        // NTRIP profile repository — owns the saved-profile list, auto-connects
-        // whenever the active profile changes, and derives the high-level
-        // NtripConnectionState exposed to UI. On first run it migrates the
-        // legacy single-profile DataStore config into a real row and seeds
-        // HEPOS / CivilPOS / SmartNet templates.
+        // NTRIP profile repository — owns saved profiles and ensures the
+        // Brazilian IBGE RBMC-IP template is available.
         ntripProfileRepo = NtripProfileRepository(this, db, ntripClient, prefs)
         lifecycleScope.launch { ntripProfileRepo.seedIfEmpty() }
 
-        // HEPOS is optional: SIRGAS2000/UTM works without the Greek grid assets.
-        heposTransform = try {
-            val deStream = assets.open("dE_2km_V1-0.grd")
-            val dnStream = assets.open("dN_2km_V1-0.grd")
-            val geoidStream = try { assets.open("geoid_hepos07.grd") } catch (_: Exception) { null }
-            org.opentopo.transform.HeposTransform(deStream, dnStream, geoidStream)
-        } catch (_: Exception) {
-            null
-        }
-        coordinateSystemService = org.opentopo.app.coordinates.CoordinateSystemService(heposTransform)
+        // Brazilian build: SIRGAS2000 / UTM does not require correction grids.
+        coordinateSystemService = org.opentopo.app.coordinates.CoordinateSystemService(null)
         surveyManager = SurveyManager(db, gnssState, coordinateSystemService)
         stakeout = Stakeout(gnssState, coordinateSystemService)
 
@@ -207,8 +191,6 @@ class MainActivity : ComponentActivity() {
                     db = db,
                     surveyManager = surveyManager,
                     stakeout = stakeout,
-                    heposTransform = heposTransform,
-                    trigPointService = trigPointService,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
