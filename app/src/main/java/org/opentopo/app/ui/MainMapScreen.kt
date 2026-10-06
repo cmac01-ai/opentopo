@@ -1573,22 +1573,54 @@ fun MainMapScreen(
         androidx.activity.compose.BackHandler(enabled = true) {
             settingsScreenOpen = false
         }
-        val amoledPref by (activity?.prefs?.preferReceiverGeoid?.collectAsState(initial = false)
-            ?: remember { mutableStateOf(false) })
-        val requireRtk by (surveyManager?.let {
-            activity?.prefs?.requireRtkFix?.collectAsState(initial = false)
-        } ?: remember { mutableStateOf(false) })
-        SettingsScreen(
-            userName = "",
-            userOrg = "",
-            amoledEnabled = amoledPref,
-            requireRtkFix = requireRtk,
-            onAmoledChange = { /* stub: AMOLED theme flag not yet in UserPreferences */ },
-            onRequireRtkChange = { v ->
-                scope.launch { activity?.prefs?.setRequireRtkFix(v) }
-            },
-            onBack = { settingsScreenOpen = false },
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.systemBars),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(
+                        onClick = { settingsScreenOpen = false },
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Voltar")
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "MAIS · CONFIGURAÇÕES",
+                            fontFamily = CoordinateFont,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "Configurações",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                SettingsPanel(
+                    db = db,
+                    surveyManager = surveyManager,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
     }
 
     if (aboutScreenOpen) {

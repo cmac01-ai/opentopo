@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.Code
@@ -26,6 +28,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,16 +39,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import org.opentopo.app.db.AppDatabase
+import org.opentopo.app.db.ProjectEntity
+import org.opentopo.app.survey.SurveyManager
 import org.opentopo.app.ui.theme.CoordinateFont
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsPanel(modifier: Modifier = Modifier) {
+fun SettingsPanel(
+    db: AppDatabase,
+    surveyManager: SurveyManager?,
+    modifier: Modifier = Modifier,
+) {
     val activity = LocalContext.current as? org.opentopo.app.MainActivity
     val prefs = activity?.prefs
     val scope = rememberCoroutineScope()
 
+    val activeProjectId by surveyManager?.activeProjectId?.collectAsState()
+        ?: remember { mutableStateOf<Long?>(null) }
+    var activeProject by remember { mutableStateOf<ProjectEntity?>(null) }
+
+    LaunchedEffect(activeProjectId) {
+        activeProject = activeProjectId?.let { db.projectDao().getById(it) }
+    }
+
+    suspend fun updateProject(transform: (ProjectEntity) -> ProjectEntity) {
+        val current = activeProject ?: return
+        val updated = transform(current).copy(updatedAt = System.currentTimeMillis())
+        db.projectDao().update(updated)
+        activeProject = updated
+        surveyManager?.setActiveProject(updated.id)
+    }
+
     // Collect all settings
+    val antennaHeight by prefs?.antennaHeight?.collectAsState(initial = "1.80")
+        ?: remember { mutableStateOf("1.80") }
     val averagingSeconds by prefs?.averagingSeconds?.collectAsState(initial = 5)
         ?: remember { mutableStateOf(5) }
     val minAccuracy by prefs?.minAccuracyM?.collectAsState(initial = "0.05")
@@ -66,9 +94,136 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        // ── Project coordinate reference system ──
+        Text(
+            "PROJETO · COORDENADAS",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column {
+                ListItem(
+                    headlineContent = { Text(activeProject?.name ?: "Nenhum projeto ativo") },
+                    supportingContent = {
+                        Text(
+                            if (activeProject != null) "SIRGAS2000 / UTM · GRS80"
+                            else "Selecione ou crie um projeto para alterar fuso e hemisfério"
+                        )
+                    },
+                )
+
+                if (activeProject != null) {
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("Hemisfério") },
+                        supportingContent = { Text("Automático usa o sinal da latitude GNSS") },
+                        trailingContent = {
+                            var expanded by remember { mutableStateOf(false) }
+                            val current = activeProject?.utmHemisphere ?: "AUTO"
+                            Box {
+                                TextButton(onClick = { expanded = true }) {
+                                    Text(
+                                        when (current) {
+                                            "NORTH" -> "Norte"
+                                            "SOUTH" -> "Sul"
+                                            else -> "Automático"
+                                        },
+                                        fontFamily = CoordinateFont,
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                ) {
+                                    listOf(
+                                        "AUTO" to "Automático",
+                                        "NORTH" to "Norte",
+                                        "SOUTH" to "Sul",
+                                    ).forEach { (value, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                scope.launch {
+                                                    updateProject { project ->
+                                                        project.copy(
+                                                            utmHemisphere = value,
+                                                            utmZone = if (value == "NORTH" && (project.utmZone ?: 18) > 22) {
+                                                                null
+                                                            } else {
+                                                                project.utmZone
+                                                            },
+                                                        )
+                                                    }
+                                                }
+                                                expanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    )
+
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("Fuso UTM") },
+                        supportingContent = { Text("Automático usa a longitude GNSS") },
+                        trailingContent = {
+                            var expanded by remember { mutableStateOf(false) }
+                            val project = activeProject!!
+                            val suffix = when (project.utmHemisphere) {
+                                "NORTH" -> "N"
+                                "SOUTH" -> "S"
+                                else -> ""
+                            }
+                            Box {
+                                TextButton(onClick = { expanded = true }) {
+                                    Text(
+                                        project.utmZone?.let { "$it$suffix" } ?: "Automático",
+                                        fontFamily = CoordinateFont,
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Automático") },
+                                        onClick = {
+                                            scope.launch { updateProject { it.copy(utmZone = null) } }
+                                            expanded = false
+                                        },
+                                    )
+                                    val zones = if (project.utmHemisphere == "NORTH") 18..22 else 18..25
+                                    zones.forEach { zone ->
+                                        DropdownMenuItem(
+                                            text = { Text("Fuso $zone$suffix") },
+                                            onClick = {
+                                                scope.launch {
+                                                    updateProject { it.copy(utmZone = zone) }
+                                                }
+                                                expanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
         // ── Recording settings ──
         Text(
             "RECORDING",
@@ -82,8 +237,26 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
         ) {
             Column {
                 ListItem(
-                    headlineContent = { Text("Averaging time") },
-                    supportingContent = { Text("Duration for epoch averaging") },
+                    headlineContent = { Text("Altura da antena (m)") },
+                    supportingContent = { Text("Altura do ponto medido até o ARP/ referência usada") },
+                    trailingContent = {
+                        OutlinedTextField(
+                            value = antennaHeight,
+                            onValueChange = { value ->
+                                scope.launch { prefs?.setAntennaHeight(value) }
+                            },
+                            modifier = Modifier.width(120.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = CoordinateFont,
+                            ),
+                            singleLine = true,
+                        )
+                    },
+                )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("Tempo de média") },
+                    supportingContent = { Text("Duração da média de épocas") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -107,7 +280,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("Min accuracy (m)") },
+                    headlineContent = { Text("Precisão máxima (m)") },
                     trailingContent = {
                         OutlinedTextField(
                             value = minAccuracy,
@@ -122,8 +295,8 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("Require RTK Fix") },
-                    supportingContent = { Text("Only accept RTK fix quality") },
+                    headlineContent = { Text("Exigir RTK Fix") },
+                    supportingContent = { Text("Só grava ponto quando a solução estiver FIX") },
                     trailingContent = {
                         Switch(
                             checked = requireRtk,
@@ -138,7 +311,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
 
         // ── Connection settings ──
         Text(
-            "CONNECTION",
+            "CONEXÃO",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
@@ -149,7 +322,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
         ) {
             Column {
                 ListItem(
-                    headlineContent = { Text("Baud rate") },
+                    headlineContent = { Text("Baud rate / serial") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -174,7 +347,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("GGA interval") },
+                    headlineContent = { Text("Intervalo GGA para NTRIP") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -201,7 +374,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
 
         // ── Display settings ──
         Text(
-            "DISPLAY",
+            "EXIBIÇÃO",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
@@ -212,8 +385,8 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
         ) {
             Column {
                 ListItem(
-                    headlineContent = { Text("Glove Mode") },
-                    supportingContent = { Text("64dp targets, volume buttons, larger fonts") },
+                    headlineContent = { Text("Modo luvas") },
+                    supportingContent = { Text("Alvos maiores e botões de volume para campo") },
                     trailingContent = {
                         Switch(
                             checked = gloveMode,
@@ -225,7 +398,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("Coordinates") },
+                    headlineContent = { Text("Formato de coordenadas") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         val formatLabels = listOf("SIRGAS2000 / UTM", "SIRGAS2000 Decimal", "Graus/min/seg")
@@ -250,7 +423,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("Geoid source") },
+                    headlineContent = { Text("Referência de altura") },
                     supportingContent = {
                         Text(
                             "Receptor GNSS (NMEA GGA) · hgeoHNOR2020 em etapa futura",
@@ -289,10 +462,10 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("About", style = MaterialTheme.typography.titleMedium)
+                Text("Sobre", style = MaterialTheme.typography.titleMedium)
                 Text("OpenTopo ${appVersion()}", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "Open-source GNSS surveying for Android",
+                    "Levantamento GNSS RTK open source para Android",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -300,11 +473,11 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 val context = LocalContext.current
                 val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                 TextButton(
-                    onClick = { uriHandler.openUri("https://github.com/ppapadeas/opentopo") },
+                    onClick = { uriHandler.openUri("https://github.com/cmac01-ai/opentopo") },
                 ) {
                     Icon(Icons.Outlined.Code, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Source code on GitHub")
+                    Text("Código-fonte no GitHub")
                 }
                 Spacer(Modifier.height(8.dp))
                 Text("CREDITS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
