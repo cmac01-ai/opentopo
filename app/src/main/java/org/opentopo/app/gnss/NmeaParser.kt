@@ -121,7 +121,9 @@ class NmeaParser(private val listener: NmeaListener) {
     private fun parseGsa(fields: List<String>, talker: String) {
         if (fields.size < 18) return
         val prns = (3..14).mapNotNull { fields.getOrNull(it)?.toIntOrNull() }
-        val systemId = fields.getOrNull(18)?.toIntOrNull()
+        // NMEA 4.10 defines systemId as hexadecimal (u-blox uses 1..4 here
+        // for GPS, GLONASS, Galileo and BeiDou).
+        val systemId = fields.getOrNull(18)?.toIntOrNull(16)
         val constellation = when (talker) {
             "GP" -> Constellation.GPS
             "GL" -> Constellation.GLONASS

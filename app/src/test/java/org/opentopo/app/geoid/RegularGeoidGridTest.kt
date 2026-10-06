@@ -8,7 +8,7 @@ import java.io.File
 class RegularGeoidGridTest {
 
     @Test
-    fun `loads IBGE style grid and interpolates bilinearly`() {
+    fun `loads IBGE style grid and interpolates cubic spline`() {
         val file = File.createTempFile("geoid", ".txt")
         file.writeText(
             """

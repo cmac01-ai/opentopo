@@ -119,6 +119,20 @@ class NmeaParserTest {
         assertEquals(2.1, gsa.vdop)
     }
 
+    @Test
+    fun `parse GN GSA system id from u-blox NMEA 4_10`() {
+        var result: GsaData? = null
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGsa(data: GsaData) { result = data }
+        })
+
+        parser.parseLine("\$GNGSA,A,3,04,05,,09,12,,,24,,,,,2.5,1.3,2.1,1*3A")
+
+        assertNotNull(result)
+        assertEquals(Constellation.GPS, result!!.constellation)
+        assertEquals(listOf(4, 5, 9, 12, 24), result!!.satellitePrns)
+    }
+
     // ── GSV ──
 
     @Test

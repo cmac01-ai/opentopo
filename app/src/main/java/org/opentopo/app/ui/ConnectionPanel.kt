@@ -513,10 +513,11 @@ private fun ConstellationsCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CONSTELLATION_CELLS.forEach { cell ->
                     val sats = byConst[cell.constellation].orEmpty()
+                    // GSA is authoritative for "used in navigation". Do not
+                    // require its SVID numbering to match the GSV list exactly:
+                    // u-blox can use strict/extended satellite numbering modes.
                     val tracked = if (activeKeys.isNotEmpty()) {
-                        sats.count { sat ->
-                            org.opentopo.app.gnss.SatelliteKey(cell.constellation, sat.prn) in activeKeys
-                        }
+                        activeKeys.count { it.constellation == cell.constellation }
                     } else {
                         sats.count { it.prn in activePrnSet }
                     }

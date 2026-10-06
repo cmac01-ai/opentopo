@@ -528,13 +528,17 @@ fun SettingsPanel(
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                if (hgeoFactorReady)
-                                                    "hgeoHNOR2020 · Imbituba"
-                                                else
-                                                    "hgeoHNOR2020 · importe a grade"
+                                                when {
+                                                    hgeoFactorReady && hgeoUncertaintyReady ->
+                                                        "hgeoHNOR2020 · Imbituba"
+                                                    hgeoFactorReady ->
+                                                        "hgeoHNOR2020 · importe a incerteza"
+                                                    else ->
+                                                        "hgeoHNOR2020 · importe as grades"
+                                                }
                                             )
                                         },
-                                        enabled = hgeoFactorReady,
+                                        enabled = hgeoFactorReady && hgeoUncertaintyReady,
                                         onClick = {
                                             scope.launch {
                                                 prefs?.setHeightModel(
@@ -566,7 +570,8 @@ fun SettingsPanel(
                         },
                     )
                     Text(
-                        "As grades são copiadas para o armazenamento interno do app e funcionam offline.",
+                        "hgeoHNOR2020 usa spline bicúbica, como o interpolador do IBGE. " +
+                            "As grades são copiadas para o armazenamento interno e funcionam offline.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
