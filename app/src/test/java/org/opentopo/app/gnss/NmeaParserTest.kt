@@ -133,6 +133,35 @@ class NmeaParserTest {
         assertEquals(listOf(4, 5, 9, 12, 24), result!!.satellitePrns)
     }
 
+    @Test
+    fun `infer GN GSA constellation from extended satellite numbering when system id is absent`() {
+        var result: GsaData? = null
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGsa(data: GsaData) { result = data }
+        })
+
+        parser.parseLine("\$GNGSA,A,3,04,05,,09,12,,,24,,,,,2.5,1.3,2.1*27")
+
+        assertNotNull(result)
+        assertEquals(Constellation.GPS, result!!.constellation)
+        assertEquals(listOf(4, 5, 9, 12, 24), result!!.satellitePrns)
+    }
+
+    @Test
+    fun `parse GSV signal id without treating it as a satellite field`() {
+        var result: GsvData? = null
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGsv(data: GsvData) { result = data }
+        })
+
+        parser.parseLine("\$GPGSV,1,1,01,04,45,120,40,1*57")
+
+        assertNotNull(result)
+        assertEquals(1, result!!.signalId)
+        assertEquals(1, result!!.satellites.size)
+        assertEquals(4, result!!.satellites.first().prn)
+    }
+
     // ── GSV ──
 
     @Test

@@ -121,8 +121,6 @@ class NmeaParser(private val listener: NmeaListener) {
     private fun parseGsa(fields: List<String>, talker: String) {
         if (fields.size < 18) return
         val prns = (3..14).mapNotNull { fields.getOrNull(it)?.toIntOrNull() }
-        // NMEA 4.10 defines systemId as hexadecimal (u-blox uses 1..4 here
-        // for GPS, GLONASS, Galileo and BeiDou).
         val systemId = fields.getOrNull(18)?.toIntOrNull(16)
         val constellation = when (talker) {
             "GP" -> Constellation.GPS
@@ -134,9 +132,9 @@ class NmeaParser(private val listener: NmeaListener) {
                 2 -> Constellation.GLONASS
                 3 -> Constellation.GALILEO
                 4 -> Constellation.BEIDOU
-                else -> Constellation.UNKNOWN
+                else -> inferConstellation(prns)
             }
-            else -> Constellation.UNKNOWN
+            else -> inferConstellation(prns)
         }
         val gsa = GsaData(
             mode = fields[1].firstOrNull() ?: 'A',
@@ -155,7 +153,7 @@ class NmeaParser(private val listener: NmeaListener) {
     private fun parseGsv(fields: List<String>) {
         if (fields.size < 4) return
         val talker = fields[0].take(2)
-        val constellation = when (talker) {
+        val talkerConstellation = when (talker) {
             "GP" -> Constellation.GPS
             "GL" -> Constellation.GLONASS
             "GA" -> Constellation.GALILEO
@@ -166,28 +164,62 @@ class NmeaParser(private val listener: NmeaListener) {
         val messageNumber = fields[2].toIntOrNull() ?: return
         val totalSats = fields[3].toIntOrNull() ?: 0
 
+        // NMEA 4.10+ appends a signalId after the repeated satellite blocks.
+        // u-blox emits separate GSV sequences per signal, so this ID must be
+        // part of the accumulation key or later sequences overwrite earlier ones.
+        val hasSignalId = (fields.size - 4) % 4 == 1
+        val signalId = if (hasSignalId) fields.last().toIntOrNull(16) else null
+        val endExclusive = if (hasSignalId) fields.size - 1 else fields.size
+
         val satellites = mutableListOf<SatelliteInfo>()
         var i = 4
-        while (i + 3 < fields.size) {
+        while (i + 3 < endExclusive) {
             val prn = fields[i].toIntOrNull()
             val elevation = fields[i + 1].toIntOrNull()
             val azimuth = fields[i + 2].toIntOrNull()
-            val snr = fields[i + 3].substringBefore('*').toIntOrNull()
+            val snr = fields[i + 3].toIntOrNull()
             if (prn != null) {
+                val constellation = if (talkerConstellation != Constellation.UNKNOWN) {
+                    talkerConstellation
+                } else {
+                    inferConstellation(listOf(prn))
+                }
                 satellites.add(SatelliteInfo(prn, elevation, azimuth, snr, constellation))
             }
             i += 4
         }
 
+        val resolvedConstellation = if (talkerConstellation != Constellation.UNKNOWN) {
+            talkerConstellation
+        } else {
+            satellites.map { it.constellation }.distinct().singleOrNull()
+                ?: Constellation.UNKNOWN
+        }
+
         listener.onGsv(
             GsvData(
-                constellation = constellation,
+                constellation = resolvedConstellation,
+                signalId = signalId,
                 totalMessages = totalMessages,
                 messageNumber = messageNumber,
                 totalSatellites = totalSats,
                 satellites = satellites,
             )
         )
+    }
+
+    private fun inferConstellation(prns: List<Int>): Constellation {
+        if (prns.isEmpty()) return Constellation.UNKNOWN
+        val inferred = prns.mapNotNull { prn ->
+            when (prn) {
+                in 1..32 -> Constellation.GPS
+                in 65..96 -> Constellation.GLONASS
+                in 211..246, in 301..336 -> Constellation.GALILEO
+                in 401..463 -> Constellation.BEIDOU
+                else -> null
+            }
+        }.distinct()
+        return inferred.singleOrNull() ?: Constellation.UNKNOWN
     }
 
     // ── GST: Pseudorange Noise Statistics ──
@@ -292,6 +324,7 @@ data class GsaData(
 
 data class GsvData(
     val constellation: Constellation,
+    val signalId: Int? = null,
     val totalMessages: Int,
     val messageNumber: Int,
     val totalSatellites: Int,

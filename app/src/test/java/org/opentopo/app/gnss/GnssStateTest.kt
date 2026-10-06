@@ -40,4 +40,38 @@ class GnssStateTest {
         assertTrue(SatelliteKey(Constellation.GPS, 4) in keys)
         assertTrue(SatelliteKey(Constellation.GALILEO, 2) in keys)
     }
+
+    @Test
+    fun `merges GSV sequences from multiple signal ids for the same constellation`() {
+        val state = GnssState()
+
+        state.onGsv(
+            GsvData(
+                constellation = Constellation.GPS,
+                signalId = 1,
+                totalMessages = 1,
+                messageNumber = 1,
+                totalSatellites = 1,
+                satellites = listOf(
+                    SatelliteInfo(4, 45, 120, 40, Constellation.GPS)
+                ),
+            )
+        )
+        state.onGsv(
+            GsvData(
+                constellation = Constellation.GPS,
+                signalId = 6,
+                totalMessages = 1,
+                messageNumber = 1,
+                totalSatellites = 1,
+                satellites = listOf(
+                    SatelliteInfo(9, 50, 180, 42, Constellation.GPS)
+                ),
+            )
+        )
+
+        assertEquals(2, state.satellites.value.totalInView)
+        assertEquals(setOf(4, 9), state.satellites.value.satellites.map { it.prn }.toSet())
+    }
+
 }

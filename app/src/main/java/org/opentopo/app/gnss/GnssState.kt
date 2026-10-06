@@ -33,10 +33,15 @@ class GnssState : NmeaListener {
     private val _activeTransport = MutableStateFlow<Transport?>(null)
     val activeTransport: StateFlow<Transport?> = _activeTransport.asStateFlow()
 
-    // Accumulate GSV messages across a sequence
-    private val gsvAccumulator = mutableMapOf<Constellation, MutableList<SatelliteInfo>>()
-    private var gsvExpectedMessages = mutableMapOf<Constellation, Int>()
-    private var gsvReceivedMessages = mutableMapOf<Constellation, Int>()
+    // Accumulate GSV messages across sequences. u-blox may emit one sequence
+    // per signal (L1/L2/E1/E5...), so constellation alone is not a unique key.
+    private data class GsvGroupKey(val constellation: Constellation, val signalId: Int?)
+    private data class CompletedGsv(val timestampMs: Long, val satellites: List<SatelliteInfo>)
+
+    private val gsvAccumulator = mutableMapOf<GsvGroupKey, MutableList<SatelliteInfo>>()
+    private val gsvExpectedMessages = mutableMapOf<GsvGroupKey, Int>()
+    private val gsvReceivedMessages = mutableMapOf<GsvGroupKey, Int>()
+    private val completedGsv = mutableMapOf<GsvGroupKey, CompletedGsv>()
     private val activePrnsByConstellation = mutableMapOf<Constellation, Set<Int>>()
 
     fun setConnectionStatus(status: ConnectionStatus) {
@@ -138,18 +143,29 @@ class GnssState : NmeaListener {
     }
 
     override fun onGsv(data: GsvData) {
-        val constellation = data.constellation
+        val key = GsvGroupKey(data.constellation, data.signalId)
         if (data.messageNumber == 1) {
-            gsvAccumulator[constellation] = mutableListOf()
-            gsvExpectedMessages[constellation] = data.totalMessages
-            gsvReceivedMessages[constellation] = 0
+            gsvAccumulator[key] = mutableListOf()
+            gsvExpectedMessages[key] = data.totalMessages
+            gsvReceivedMessages[key] = 0
         }
-        gsvAccumulator[constellation]?.addAll(data.satellites)
-        gsvReceivedMessages[constellation] = (gsvReceivedMessages[constellation] ?: 0) + 1
+        gsvAccumulator[key]?.addAll(data.satellites)
+        gsvReceivedMessages[key] = (gsvReceivedMessages[key] ?: 0) + 1
 
-        // When we've received all messages for this constellation, update state
-        if (gsvReceivedMessages[constellation] == gsvExpectedMessages[constellation]) {
-            val allSatellites = gsvAccumulator.values.flatten()
+        if (gsvReceivedMessages[key] == gsvExpectedMessages[key]) {
+            completedGsv[key] = CompletedGsv(
+                timestampMs = System.currentTimeMillis(),
+                satellites = gsvAccumulator[key].orEmpty().toList(),
+            )
+
+            val now = System.currentTimeMillis()
+            completedGsv.entries.removeAll { now - it.value.timestampMs > 10_000L }
+
+            val allSatellites = completedGsv.values
+                .flatMap { it.satellites }
+                .filter { it.constellation != Constellation.UNKNOWN }
+                .distinctBy { SatelliteKey(it.constellation, it.prn) }
+
             _satellites.value = SatelliteState(
                 satellites = allSatellites,
                 totalInView = allSatellites.size,

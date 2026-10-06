@@ -458,6 +458,7 @@ private fun ProjectDetail(
             currentSigmaH = sigmaH,
             targetSigmaH = accuracyGateSigma,
             rtkGateOn = surveyManager?.requireRtkFix ?: true,
+            currentFixQuality = currentFix,
         )
 
         // Error feedback, if any
@@ -786,6 +787,7 @@ private fun EpochAveragingCard(
     currentSigmaH: Double?,
     targetSigmaH: Double,
     rtkGateOn: Boolean,
+    currentFixQuality: Int,
 ) {
     val clamped = progress.coerceIn(0f, 1f)
     val seconds = epochsCollected.toDouble()
@@ -875,12 +877,26 @@ private fun EpochAveragingCard(
             ) {
                 val thresholdMet = currentSigmaH != null && currentSigmaH <= targetSigmaH
                 val gateCm = (targetSigmaH * 100).toInt()
+                val waitingForRtkFix = rtkGateOn && currentFixQuality != 4
+                val fixLabel = when (currentFixQuality) {
+                    4 -> "RTK FIX"
+                    5 -> "RTK FLOAT"
+                    2 -> "DGPS"
+                    1 -> "GPS"
+                    else -> "SEM FIX"
+                }
                 Text(
-                    if (thresholdMet) "\u2713 \u03C3H below $gateCm cm threshold"
-                    else "\u2026 waiting for \u03C3H \u2264 $gateCm cm",
+                    when {
+                        waitingForRtkFix -> "… aguardando RTK FIX · atual: $fixLabel"
+                        thresholdMet -> "✓ σH abaixo do limite de $gateCm cm"
+                        else -> "… aguardando σH ≤ $gateCm cm"
+                    },
                     style = monoStats.copy(fontWeight = FontWeight.W700),
-                    color = if (thresholdMet) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (!waitingForRtkFix && thresholdMet) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
                 Text(
                     if (rtkGateOn) "RTK gate ON" else "RTK gate off",
