@@ -26,15 +26,19 @@ object GeoJsonExporter {
             if (index > 0) writer.write(",")
             writer.write("""{"type":"Feature","properties":{""")
             writer.write(""""id":${jsonString(p.pointId)}""")
+            if (p.attribute.isNotBlank()) writer.write(""","attribute":${jsonString(p.attribute)}""")
             writer.write(""","reference_system":"SIRGAS2000"""")
             p.easting?.let { writer.write(""","easting_utm":${"%.3f".format(Locale.US, it)}""") }
             p.northing?.let { writer.write(""","northing_utm":${"%.3f".format(Locale.US, it)}""") }
             p.crsEpsg?.let { writer.write(""","epsg":$it""") }
             p.utmZone?.let { writer.write(""","utm_zone":$it""") }
             p.utmHemisphere?.let { writer.write(""","hemisphere":${jsonString(it)}""") }
-            p.altitude?.let { writer.write(""","altitude":${"%.3f".format(Locale.US, it)}""") }
-            p.orthometricHeight?.let { writer.write(""","ortho_height":${"%.3f".format(Locale.US, it)}""") }
-            p.geoidSeparation?.let { writer.write(""","geoid_n":${"%.3f".format(Locale.US, it)}""") }
+            p.altitude?.let { writer.write(""","ellipsoidal_height":${"%.3f".format(Locale.US, it)}""") }
+            p.orthometricHeight?.let { writer.write(""","physical_height":${"%.3f".format(Locale.US, it)}""") }
+            p.heightModel?.let { writer.write(""","height_model":${jsonString(it)}""") }
+            p.geoidSeparation?.let { writer.write(""","height_factor":${"%.3f".format(Locale.US, it)}""") }
+            p.heightUncertainty?.let { writer.write(""","height_uncertainty":${"%.3f".format(Locale.US, it)}""") }
+            p.antennaHeight?.let { writer.write(""","antenna_height":${"%.3f".format(Locale.US, it)}""") }
             p.horizontalAccuracy?.let { writer.write(""","h_accuracy":${"%.3f".format(Locale.US, it)}""") }
             p.verticalAccuracy?.let { writer.write(""","v_accuracy":${"%.3f".format(Locale.US, it)}""") }
             writer.write(""","fix":${jsonString(fixLabel(p.fixQuality))}""")

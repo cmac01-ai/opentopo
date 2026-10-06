@@ -1,5 +1,7 @@
 package org.opentopo.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,9 +41,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.opentopo.app.db.AppDatabase
 import org.opentopo.app.db.ProjectEntity
+import org.opentopo.app.geoid.GeoidModelService
+import org.opentopo.app.geoid.HeightModels
 import org.opentopo.app.survey.SurveyManager
 import org.opentopo.app.ui.theme.CoordinateFont
 
@@ -51,9 +58,59 @@ fun SettingsPanel(
     surveyManager: SurveyManager?,
     modifier: Modifier = Modifier,
 ) {
-    val activity = LocalContext.current as? org.opentopo.app.MainActivity
+    val context = LocalContext.current
+    val activity = context as? org.opentopo.app.MainActivity
     val prefs = activity?.prefs
     val scope = rememberCoroutineScope()
+    val geoidModels = remember { GeoidModelService(context.applicationContext) }
+    var geoidFilesVersion by remember { mutableIntStateOf(0) }
+
+    val hgeoFactorReady = remember(geoidFilesVersion) {
+        geoidModels.hasFile(GeoidModelService.HGEO_FACTOR_FILE)
+    }
+    val hgeoUncertaintyReady = remember(geoidFilesVersion) {
+        geoidModels.hasFile(GeoidModelService.HGEO_UNCERTAINTY_FILE)
+    }
+    val mapgeoReady = remember(geoidFilesVersion) {
+        geoidModels.hasFile(GeoidModelService.MAPGEO_FILE)
+    }
+
+    fun importGeoidFile(uri: android.net.Uri?, target: String, label: String) {
+        if (uri == null) return
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { geoidModels.importFile(uri, target) }
+                geoidFilesVersion++
+                android.widget.Toast.makeText(
+                    context,
+                    "$label importado e disponível offline.",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(
+                    context,
+                    "Falha ao importar $label: ${e.message ?: "arquivo inválido"}",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    val hgeoFactorLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        importGeoidFile(uri, GeoidModelService.HGEO_FACTOR_FILE, "hgeoHNOR2020 · fator")
+    }
+    val hgeoUncertaintyLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        importGeoidFile(uri, GeoidModelService.HGEO_UNCERTAINTY_FILE, "hgeoHNOR2020 · incerteza")
+    }
+    val mapgeoLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        importGeoidFile(uri, GeoidModelService.MAPGEO_FILE, "MAPGEO2015")
+    }
 
     val activeProjectId by surveyManager?.activeProjectId?.collectAsState()
         ?: remember { mutableStateOf<Long?>(null) }
@@ -90,6 +147,8 @@ fun SettingsPanel(
         ?: remember { mutableStateOf(false) }
     val preferReceiverGeoid by prefs?.preferReceiverGeoid?.collectAsState(initial = false)
         ?: remember { mutableStateOf(false) }
+    val heightModel by prefs?.heightModel?.collectAsState(initial = HeightModels.RECEIVER)
+        ?: remember { mutableStateOf(HeightModels.RECEIVER) }
 
     Column(
         modifier = modifier
@@ -425,32 +484,124 @@ fun SettingsPanel(
                     },
                 )
                 HorizontalDivider()
-                ListItem(
-                    headlineContent = { Text("Referência de altura") },
-                    supportingContent = {
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Referência de altura") },
+                        supportingContent = {
+                            Text(
+                                when (heightModel) {
+                                    HeightModels.HGEONOR2020_IMBITUBA ->
+                                        "hgeoHNOR2020 · Imbituba · altitude normal"
+                                    HeightModels.MAPGEO2015 ->
+                                        "MAPGEO2015 · altitude ortométrica"
+                                    else ->
+                                        "Receptor GNSS · NMEA GGA"
+                                }
+                            )
+                        },
+                        trailingContent = {
+                            var expanded by remember { mutableStateOf(false) }
+                            Box {
+                                TextButton(onClick = { expanded = true }) {
+                                    Text(
+                                        when (heightModel) {
+                                            HeightModels.HGEONOR2020_IMBITUBA -> "hgeoHNOR2020"
+                                            HeightModels.MAPGEO2015 -> "MAPGEO2015"
+                                            else -> "Receptor"
+                                        }
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Receptor GNSS / NMEA GGA") },
+                                        onClick = {
+                                            scope.launch {
+                                                prefs?.setHeightModel(HeightModels.RECEIVER)
+                                            }
+                                            expanded = false
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (hgeoFactorReady)
+                                                    "hgeoHNOR2020 · Imbituba"
+                                                else
+                                                    "hgeoHNOR2020 · importe a grade"
+                                            )
+                                        },
+                                        enabled = hgeoFactorReady,
+                                        onClick = {
+                                            scope.launch {
+                                                prefs?.setHeightModel(
+                                                    HeightModels.HGEONOR2020_IMBITUBA
+                                                )
+                                            }
+                                            expanded = false
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (mapgeoReady)
+                                                    "MAPGEO2015"
+                                                else
+                                                    "MAPGEO2015 · importe a grade"
+                                            )
+                                        },
+                                        enabled = mapgeoReady,
+                                        onClick = {
+                                            scope.launch {
+                                                prefs?.setHeightModel(HeightModels.MAPGEO2015)
+                                            }
+                                            expanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        },
+                    )
+                    Text(
+                        "As grades são copiadas para o armazenamento interno do app e funcionam offline.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                    TextButton(
+                        onClick = { hgeoFactorLauncher.launch(arrayOf("text/plain", "text/*", "application/octet-stream")) },
+                    ) {
                         Text(
-                            "Receptor GNSS (NMEA GGA) · hgeoHNOR2020 em etapa futura",
+                            if (hgeoFactorReady)
+                                "✓ hgeoHNOR2020 · fator de conversão"
+                            else
+                                "Importar hgeoHNOR2020 · fator de conversão"
                         )
-                    },
-                    trailingContent = {
-                        var expanded by remember { mutableStateOf(false) }
-                        Box {
-                            TextButton(onClick = { expanded = true }) {
-                                Text("Receptor")
-                                Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
-                            }
-                            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Receptor GNSS / NMEA GGA") },
-                                    onClick = {
-                                        scope.launch { prefs?.setPreferReceiverGeoid(true) }
-                                        expanded = false
-                                    },
-                                )
-                            }
-                        }
-                    },
-                )
+                    }
+                    TextButton(
+                        onClick = { hgeoUncertaintyLauncher.launch(arrayOf("text/plain", "text/*", "application/octet-stream")) },
+                    ) {
+                        Text(
+                            if (hgeoUncertaintyReady)
+                                "✓ hgeoHNOR2020 · incerteza"
+                            else
+                                "Importar hgeoHNOR2020 · incerteza"
+                        )
+                    }
+                    TextButton(
+                        onClick = { mapgeoLauncher.launch(arrayOf("text/plain", "text/*", "application/octet-stream")) },
+                    ) {
+                        Text(
+                            if (mapgeoReady)
+                                "✓ MAPGEO2015 · SIRGAS2000"
+                            else
+                                "Importar MAPGEO2015 · SIRGAS2000"
+                        )
+                    }
+                }
             }
         }
 

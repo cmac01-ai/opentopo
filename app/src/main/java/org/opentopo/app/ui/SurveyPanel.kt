@@ -188,11 +188,21 @@ private fun ProjectDetail(
     val prefs = activity?.prefs
     val savedAH by prefs?.antennaHeight?.collectAsState(initial = "1.80")
         ?: remember { mutableStateOf("1.80") }
+    val savedPointPattern by prefs?.pointPattern?.collectAsState(initial = "P")
+        ?: remember { mutableStateOf("P") }
+    val savedPointAttribute by prefs?.pointAttribute?.collectAsState(initial = "")
+        ?: remember { mutableStateOf("") }
+
     var antennaHeight by remember { mutableStateOf(savedAH) }
+    var pointPattern by remember { mutableStateOf(savedPointPattern) }
+    var pointAttribute by remember { mutableStateOf(savedPointAttribute) }
+    var attributeMenuExpanded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // Sync when saved value loads
+    // Sync when saved values load.
     LaunchedEffect(savedAH) { antennaHeight = savedAH }
+    LaunchedEffect(savedPointPattern) { pointPattern = savedPointPattern }
+    LaunchedEffect(savedPointAttribute) { pointAttribute = savedPointAttribute }
 
     // Recording mode switcher state
     val recordingMode by surveyManager?.recordingMode?.collectAsState()
@@ -205,6 +215,8 @@ private fun ProjectDetail(
     // Live EGSA87 projected coordinates from SurveyManager
     val projected by surveyManager?.projectedPosition?.collectAsState()
         ?: remember { mutableStateOf(null) }
+    val projectedCrsLabel by surveyManager?.projectedCrsLabel?.collectAsState()
+        ?: remember { mutableStateOf("SIRGAS2000 · UTM") }
 
     // Derive current fix/σH/sats from the last recorded epoch (the only live
     // signal reachable from SurveyPanel without touching MainActivity).
@@ -232,13 +244,26 @@ private fun ProjectDetail(
     // SurveyManager will filter unqualified epochs internally.
     val recordEnabled: Boolean = surveyManager != null &&
         (lastPt == null || (currentFix >= 4 && (sigmaH ?: Double.MAX_VALUE) <= accuracyGateSigma))
+    val nextPointId = deriveNextPointId(pointPattern, points)
 
     val onRecord: () -> Unit = {
         if (recordingState.isRecording) {
             surveyManager?.cancelRecording()
         } else if (surveyManager != null) {
-            surveyManager.antennaHeight = antennaHeight.toDoubleOrNull()
-            surveyManager.startRecording(project.id, remarks)
+            val ah = antennaHeight.replace(',', '.').toDoubleOrNull()
+            surveyManager.antennaHeight = ah
+            scope.launch {
+                prefs?.setAntennaHeight(antennaHeight)
+                prefs?.setPointPattern(pointPattern)
+                prefs?.setPointAttribute(pointAttribute)
+            }
+            surveyManager.startRecording(
+                projectId = project.id,
+                remarks = remarks,
+                pointIdOverride = nextPointId,
+                attribute = pointAttribute,
+                antennaHeightOverride = ah,
+            )
             remarks = ""
         }
         Unit
@@ -292,6 +317,108 @@ private fun ProjectDetail(
             modifier = Modifier.fillMaxWidth(),
         )
 
+        if (recordingMode == "point") {
+            Spacer(Modifier.height(12.dp))
+            TonalCard {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "CADASTRO DO PONTO",
+                        style = LabelOverline,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = pointPattern,
+                            onValueChange = { pointPattern = it.uppercase() },
+                            label = { Text("Nome / sequência") },
+                            supportingText = {
+                                Text("CE → CE001… · 001 → 001, 002…")
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = CoordinateFont,
+                            ),
+                        )
+                        OutlinedTextField(
+                            value = antennaHeight,
+                            onValueChange = { antennaHeight = it },
+                            label = { Text("Antena (m)") },
+                            modifier = Modifier.width(120.dp),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = CoordinateFont,
+                            ),
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = pointAttribute,
+                            onValueChange = { pointAttribute = it.uppercase() },
+                            label = { Text("Atributo") },
+                            placeholder = { Text("CERCA, RUA, MEIO-FIO…") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                        )
+                        Box {
+                            OutlinedButton(onClick = { attributeMenuExpanded = true }) {
+                                Text("Lista")
+                            }
+                            DropdownMenu(
+                                expanded = attributeMenuExpanded,
+                                onDismissRequest = { attributeMenuExpanded = false },
+                            ) {
+                                listOf(
+                                    "",
+                                    "CERCA",
+                                    "RUA",
+                                    "MEIO-FIO",
+                                    "EIXO",
+                                    "POSTE",
+                                    "MURO",
+                                    "EDIFICAÇÃO",
+                                    "BUEIRO",
+                                    "TALUDE",
+                                ).forEach { attribute ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (attribute.isBlank()) "Sem atributo"
+                                                else attribute
+                                            )
+                                        },
+                                        onClick = {
+                                            pointAttribute = attribute
+                                            attributeMenuExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = remarks,
+                        onValueChange = { remarks = it },
+                        label = { Text("Observação") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+
+                    Text(
+                        "Próximo ponto: $nextPointId",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = CoordinateFont,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+
         // 3. Fix status pill — left-aligned
         Spacer(Modifier.height(14.dp))
         val sigmaExtras: String? = buildString {
@@ -312,7 +439,7 @@ private fun ProjectDetail(
         // 4. Coordinate card — inline per mockup spec (20sp mono, 18x16 padding)
         Spacer(Modifier.height(12.dp))
         CoordinateCard(
-            label = "EGSA87 · EPSG 2100",
+            label = projectedCrsLabel,
             easting = projected?.eastingM,
             northing = projected?.northingM,
             heightM = lastPt?.orthometricHeight,
@@ -324,7 +451,7 @@ private fun ProjectDetail(
         // 5. Epoch averaging card — gradient bar + footer row
         Spacer(Modifier.height(14.dp))
         EpochAveragingCard(
-            pointId = "P${String.format("%03d", points.size + 1)}",
+            pointId = nextPointId,
             epochsCollected = recordingState.epochsCollected,
             epochsTarget = recordingState.totalEpochsTarget,
             progress = progressFraction,
@@ -828,6 +955,33 @@ private fun PointCard(point: PointEntity, db: AppDatabase) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                val pointMeta = buildString {
+                    if (point.attribute.isNotBlank()) append(point.attribute)
+                    point.antennaHeight?.let {
+                        if (isNotEmpty()) append(" · ")
+                        append("Antena ${"%.3f".format(it)} m")
+                    }
+                    point.heightModel?.let {
+                        if (isNotEmpty()) append(" · ")
+                        append(
+                            when (it) {
+                                org.opentopo.app.geoid.HeightModels.HGEONOR2020_IMBITUBA -> "hgeoHNOR2020"
+                                org.opentopo.app.geoid.HeightModels.MAPGEO2015 -> "MAPGEO2015"
+                                else -> "NMEA GGA"
+                            }
+                        )
+                    }
+                    point.heightUncertainty?.let {
+                        append(" · u=${"%.2f".format(it)} m")
+                    }
+                }
+                if (pointMeta.isNotBlank()) {
+                    Text(
+                        pointMeta,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -932,10 +1086,15 @@ private fun PointCard(point: PointEntity, db: AppDatabase) {
         EditPointDialog(
             point = point,
             onDismiss = { showEditDialog = false },
-            onSave = { newRemarks, newAH ->
+            onSave = { newId, newAttribute, newRemarks, newAH ->
                 scope.launch {
                     db.pointDao().update(
-                        point.copy(remarks = newRemarks, antennaHeight = newAH),
+                        point.copy(
+                            pointId = newId,
+                            attribute = newAttribute,
+                            remarks = newRemarks,
+                            antennaHeight = newAH,
+                        ),
                     )
                 }
                 showEditDialog = false
@@ -950,8 +1109,10 @@ private fun PointCard(point: PointEntity, db: AppDatabase) {
 private fun EditPointDialog(
     point: PointEntity,
     onDismiss: () -> Unit,
-    onSave: (remarks: String, antennaHeight: Double?) -> Unit,
+    onSave: (pointId: String, attribute: String, remarks: String, antennaHeight: Double?) -> Unit,
 ) {
+    var pointId by remember { mutableStateOf(point.pointId) }
+    var attribute by remember { mutableStateOf(point.attribute) }
     var remarks by remember { mutableStateOf(point.remarks) }
     var antennaHeight by remember {
         mutableStateOf(point.antennaHeight?.let { "%.2f".format(it) } ?: "")
@@ -969,6 +1130,20 @@ private fun EditPointDialog(
         title = { Text("Edit ${point.pointId}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = pointId,
+                    onValueChange = { pointId = it.uppercase() },
+                    label = { Text("Nome do ponto") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = attribute,
+                    onValueChange = { attribute = it.uppercase() },
+                    label = { Text("Atributo") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 OutlinedTextField(
                     value = antennaHeight,
                     onValueChange = { antennaHeight = it },
@@ -990,7 +1165,12 @@ private fun EditPointDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(remarks, antennaHeight.toDoubleOrNull())
+                    onSave(
+                        pointId.ifBlank { point.pointId },
+                        attribute,
+                        remarks,
+                        antennaHeight.replace(',', '.').toDoubleOrNull(),
+                    )
                 },
             ) {
                 Text("Save")
@@ -1005,6 +1185,45 @@ private fun EditPointDialog(
 }
 
 // ── New project dialog ──
+
+private fun deriveNextPointId(patternInput: String, points: List<PointEntity>): String {
+    val raw = patternInput.trim().uppercase().ifBlank { "P" }
+    val numericOnly = raw.all { it.isDigit() }
+
+    if (numericOnly) {
+        val start = raw.toIntOrNull() ?: 1
+        val width = raw.length.coerceAtLeast(1)
+        val existing = points.asSequence()
+            .filter { it.layerType == "point" }
+            .mapNotNull { point ->
+                point.pointId.takeIf { id -> id.all(Char::isDigit) }?.toIntOrNull()
+            }
+            .filter { it >= start }
+            .maxOrNull()
+        val next = existing?.plus(1) ?: start
+        return next.toString().padStart(width, '0')
+    }
+
+    val trailingDigits = raw.takeLastWhile { it.isDigit() }
+    val prefix = raw.dropLast(trailingDigits.length).ifBlank { "P" }
+    val start = trailingDigits.toIntOrNull() ?: 1
+    val width = if (trailingDigits.isNotEmpty()) trailingDigits.length else 3
+    val regex = Regex("^" + Regex.escape(prefix) + "(\\d+)$")
+
+    val existing = points.asSequence()
+        .filter { it.layerType == "point" }
+        .mapNotNull { point ->
+            regex.matchEntire(point.pointId.uppercase())
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toIntOrNull()
+        }
+        .filter { it >= start }
+        .maxOrNull()
+    val next = existing?.plus(1) ?: start
+    return prefix + next.toString().padStart(width, '0')
+}
+
 
 @Composable
 private fun NewProjectDialog(

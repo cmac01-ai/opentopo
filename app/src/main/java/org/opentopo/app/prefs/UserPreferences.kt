@@ -39,6 +39,8 @@ class UserPreferences(private val context: Context) {
     private val KEY_MIN_ACCURACY_M = stringPreferencesKey("min_accuracy_m")
     private val KEY_REQUIRE_RTK_FIX = booleanPreferencesKey("require_rtk_fix")
     private val KEY_BAUD_RATE = intPreferencesKey("baud_rate")
+    private val KEY_POINT_PATTERN = stringPreferencesKey("point_pattern")
+    private val KEY_POINT_ATTRIBUTE = stringPreferencesKey("point_attribute")
 
     // ── NTRIP extras ──
     private val KEY_GGA_INTERVAL = intPreferencesKey("gga_interval_seconds")
@@ -51,6 +53,7 @@ class UserPreferences(private val context: Context) {
     // Brazilian build currently prefers the receiver-reported NMEA GGA geoid separation.
     // A native hgeoHNOR2020 grid can be added in a later phase.
     private val KEY_PREFER_RECEIVER_GEOID = booleanPreferencesKey("prefer_receiver_geoid")
+    private val KEY_HEIGHT_MODEL = stringPreferencesKey("height_model")
 
     // ── Flows ──
 
@@ -68,10 +71,15 @@ class UserPreferences(private val context: Context) {
     val minAccuracyM: Flow<String> = context.dataStore.data.map { it[KEY_MIN_ACCURACY_M] ?: "0.05" }
     val requireRtkFix: Flow<Boolean> = context.dataStore.data.map { it[KEY_REQUIRE_RTK_FIX] ?: false }
     val baudRate: Flow<Int> = context.dataStore.data.map { it[KEY_BAUD_RATE] ?: 115200 }
+    val pointPattern: Flow<String> = context.dataStore.data.map { it[KEY_POINT_PATTERN] ?: "P" }
+    val pointAttribute: Flow<String> = context.dataStore.data.map { it[KEY_POINT_ATTRIBUTE] ?: "" }
     val ggaIntervalSeconds: Flow<Int> = context.dataStore.data.map { it[KEY_GGA_INTERVAL] ?: 10 }
     val coordFormat: Flow<Int> = context.dataStore.data.map { it[KEY_COORD_FORMAT] ?: 0 }
     val gloveMode: Flow<Boolean> = context.dataStore.data.map { it[KEY_GLOVE_MODE] ?: false }
     val preferReceiverGeoid: Flow<Boolean> = context.dataStore.data.map { it[KEY_PREFER_RECEIVER_GEOID] ?: true }
+    val heightModel: Flow<String> = context.dataStore.data.map {
+        it[KEY_HEIGHT_MODEL] ?: org.opentopo.app.geoid.HeightModels.RECEIVER
+    }
 
     // ── Setters ──
 
@@ -131,6 +139,14 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit { it[KEY_BAUD_RATE] = value }
     }
 
+    suspend fun setPointPattern(value: String) {
+        context.dataStore.edit { it[KEY_POINT_PATTERN] = value }
+    }
+
+    suspend fun setPointAttribute(value: String) {
+        context.dataStore.edit { it[KEY_POINT_ATTRIBUTE] = value }
+    }
+
     suspend fun setGgaIntervalSeconds(value: Int) {
         context.dataStore.edit { it[KEY_GGA_INTERVAL] = value }
     }
@@ -145,5 +161,9 @@ class UserPreferences(private val context: Context) {
 
     suspend fun setPreferReceiverGeoid(value: Boolean) {
         context.dataStore.edit { it[KEY_PREFER_RECEIVER_GEOID] = value }
+    }
+
+    suspend fun setHeightModel(value: String) {
+        context.dataStore.edit { it[KEY_HEIGHT_MODEL] = value }
     }
 }

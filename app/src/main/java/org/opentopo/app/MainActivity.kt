@@ -37,6 +37,7 @@ import org.opentopo.app.gnss.GnssState
 import org.opentopo.app.gnss.GnssKeepAliveService
 import org.opentopo.app.gnss.InternalGnssService
 import org.opentopo.app.gnss.UsbGnssService
+import org.opentopo.app.geoid.GeoidModelService
 import org.opentopo.app.ntrip.NtripClient
 import org.opentopo.app.ntrip.NtripProfileRepository
 import org.opentopo.app.survey.Stakeout
@@ -62,6 +63,7 @@ class MainActivity : ComponentActivity() {
     private var surveyManager: SurveyManager? = null
     private var stakeout: Stakeout? = null
     private lateinit var coordinateSystemService: org.opentopo.app.coordinates.CoordinateSystemService
+    private lateinit var geoidModelService: GeoidModelService
 
     /** True when the activity is in picture-in-picture mode. */
     private val _isInPipMode = MutableStateFlow(false)
@@ -139,7 +141,8 @@ class MainActivity : ComponentActivity() {
 
         // Brazilian build: SIRGAS2000 / UTM does not require correction grids.
         coordinateSystemService = org.opentopo.app.coordinates.CoordinateSystemService(null)
-        surveyManager = SurveyManager(db, gnssState, coordinateSystemService)
+        geoidModelService = GeoidModelService(this)
+        surveyManager = SurveyManager(db, gnssState, coordinateSystemService, geoidModelService)
         stakeout = Stakeout(gnssState, coordinateSystemService)
 
         // Feed GNSS position to NtripClient continuously for GGA generation
@@ -168,6 +171,11 @@ class MainActivity : ComponentActivity() {
             launch {
                 prefs.requireRtkFix.collect { required ->
                     surveyManager?.requireRtkFix = required
+                }
+            }
+            launch {
+                prefs.heightModel.collect { model ->
+                    surveyManager?.heightModel = model
                 }
             }
             launch {
