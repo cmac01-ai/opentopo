@@ -117,6 +117,7 @@ fun StakeoutPanel(
     onPipRequest: (() -> Unit)? = null,
     onVerifyRequest: (() -> Unit)? = null,
     onNextTarget: (() -> Unit)? = null,
+    crsLabel: String = "SIRGAS2000 / UTM",
     modifier: Modifier = Modifier,
 ) {
     val result by stakeout?.result?.collectAsState(initial = null) ?: remember { mutableStateOf(null) }
@@ -146,6 +147,7 @@ fun StakeoutPanel(
             onTargetName = { targetName = it },
             onTargetE = { targetE = it },
             onTargetN = { targetN = it },
+            crsLabel = crsLabel,
             modifier = modifier,
         )
     } else {
@@ -647,6 +649,7 @@ private fun StakeoutTargetForm(
     onTargetName: (String) -> Unit,
     onTargetE: (String) -> Unit,
     onTargetN: (String) -> Unit,
+    crsLabel: String,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -687,7 +690,7 @@ private fun StakeoutTargetForm(
         ) {
             Icon(Icons.Outlined.FileUpload, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Import Target from CSV")
+            Text("Importar alvo de CSV")
         }
 
         Surface(
@@ -701,14 +704,14 @@ private fun StakeoutTargetForm(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Target (EGSA87)",
+                    "Alvo ($crsLabel)",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextField(
                     value = targetName,
                     onValueChange = onTargetName,
-                    label = { Text("Name") },
+                    label = { Text("Nome") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     shape = MaterialTheme.shapes.small,
@@ -738,7 +741,7 @@ private fun StakeoutTargetForm(
                         val n = targetN.toDoubleOrNull()
                         if (e != null && n != null) {
                             stakeout?.setTarget(
-                                StakeoutTarget(targetName.ifBlank { "Target" }, e, n),
+                                StakeoutTarget(targetName.ifBlank { "Alvo" }, e, n),
                             )
                         }
                     },
@@ -746,7 +749,7 @@ private fun StakeoutTargetForm(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(percent = 50),
                 ) {
-                    Text("Start")
+                    Text("Iniciar")
                 }
             }
         }

@@ -653,6 +653,7 @@ fun MainMapScreen(
                                 SheetMode.SURVEY -> SurveyPanel(db, surveyManager)
                                 SheetMode.STAKEOUT -> StakeoutPanel(
                                     stakeout,
+                                    crsLabel = projectedCrsLabel,
                                     onImmersiveRequest = {
                                         stakeoutImmersive = true
                                     },
@@ -1471,8 +1472,8 @@ fun MainMapScreen(
     if (ntripProfileCreating || ntripProfileEditing != null) {
         NtripProfileEditScreen(
             initial = ntripProfileEditing,
-            onScanSourcetable = { host, port, user, pass ->
-                ntripProfileRepo.scanSourcetable(host, port, user, pass)
+            onScanSourcetable = { host, port, user, pass, useTls ->
+                ntripProfileRepo.scanSourcetable(host, port, user, pass, useTls)
             },
             onSave = { updated ->
                 scope.launch { ntripProfileRepo.upsert(updated) }

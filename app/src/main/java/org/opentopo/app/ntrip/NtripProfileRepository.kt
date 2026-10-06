@@ -178,11 +178,13 @@ class NtripProfileRepository(
         port: Int,
         username: String = "",
         password: String = "",
+        useTls: Boolean = false,
     ): Result<List<NtripMountpoint>> {
         val config = NtripConfig(
             name = "scan",
             host = host,
             port = port,
+            useTls = useTls,
             username = username,
             password = password,
         )

@@ -56,6 +56,7 @@ data class NtripProfile(
         name = displayName,
         host = host,
         port = port,
+        useTls = useTls,
         mountpoint = mountpoint,
         username = username,
         password = password,

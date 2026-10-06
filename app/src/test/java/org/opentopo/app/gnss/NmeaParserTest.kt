@@ -198,6 +198,34 @@ class NmeaParserTest {
     }
 
     @Test
+    fun `feed resynchronises after UBX binary before NMEA`() {
+        var count = 0
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGga(data: GgaData) { count++ }
+        })
+
+        val binary = byteArrayOf(0xB5.toByte(), 0x62, 0x01, 0x07, 0x10, 0x20, 0x30)
+        val gga = "\$GPGGA,092750.000,5321.6802,N,00630.3372,W,1,8,1.03,61.7,M,55.2,M,,*76\r\n"
+        parser.feed(binary + gga.toByteArray())
+
+        assertEquals(1, count)
+    }
+
+    @Test
+    fun `feed recovers after binary interrupts a partial NMEA sentence`() {
+        var count = 0
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGga(data: GgaData) { count++ }
+        })
+
+        parser.feed("\$GPGGA,0927".toByteArray())
+        parser.feed(byteArrayOf(0xB5.toByte(), 0x62))
+        parser.feed("\$GPGGA,092750.000,5321.6802,N,00630.3372,W,1,8,1.03,61.7,M,55.2,M,,*76\r\n".toByteArray())
+
+        assertEquals(1, count)
+    }
+
+    @Test
     fun `feed handles multiple sentences in one chunk`() {
         var ggaCount = 0
         var rmcCount = 0
