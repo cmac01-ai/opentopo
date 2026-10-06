@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material3.ContainedLoadingIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -60,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlin.math.abs
+import org.opentopo.app.db.PointEntity
 import org.opentopo.app.gnss.GnssState
 import org.opentopo.app.survey.Stakeout
 import org.opentopo.app.survey.StakeoutTarget
@@ -118,6 +121,7 @@ fun StakeoutPanel(
     onVerifyRequest: (() -> Unit)? = null,
     onNextTarget: (() -> Unit)? = null,
     crsLabel: String = "SIRGAS2000 / UTM",
+    projectPoints: List<PointEntity> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     val result by stakeout?.result?.collectAsState(initial = null) ?: remember { mutableStateOf(null) }
@@ -148,6 +152,7 @@ fun StakeoutPanel(
             onTargetE = { targetE = it },
             onTargetN = { targetN = it },
             crsLabel = crsLabel,
+            projectPoints = projectPoints,
             modifier = modifier,
         )
     } else {
@@ -650,6 +655,7 @@ private fun StakeoutTargetForm(
     onTargetE: (String) -> Unit,
     onTargetN: (String) -> Unit,
     crsLabel: String,
+    projectPoints: List<PointEntity>,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -682,6 +688,59 @@ private fun StakeoutTargetForm(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Spacer(Modifier.height(8.dp))
+
+        val stakeablePoints = projectPoints.filter {
+            it.layerType == "point" && it.easting != null && it.northing != null
+        }
+        if (stakeablePoints.isNotEmpty()) {
+            var pointMenuExpanded by remember { mutableStateOf(false) }
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { pointMenuExpanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.extraLarge,
+                ) {
+                    Text("Selecionar ponto do projeto (${stakeablePoints.size})")
+                }
+                DropdownMenu(
+                    expanded = pointMenuExpanded,
+                    onDismissRequest = { pointMenuExpanded = false },
+                    modifier = Modifier.fillMaxWidth(0.92f),
+                ) {
+                    stakeablePoints.forEach { point ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(point.pointId)
+                                    Text(
+                                        "E ${"%.3f".format(point.easting)} · N ${"%.3f".format(point.northing)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                val e = point.easting ?: return@DropdownMenuItem
+                                val n = point.northing ?: return@DropdownMenuItem
+                                onTargetName(point.pointId)
+                                onTargetE("%.3f".format(e))
+                                onTargetN("%.3f".format(n))
+                                stakeout?.setTarget(
+                                    StakeoutTarget(point.pointId, e, n),
+                                )
+                                pointMenuExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+        } else {
+            Text(
+                "Nenhum ponto levantado disponível neste projeto.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         OutlinedButton(
             onClick = { importLauncher.launch("text/*") },

@@ -654,6 +654,7 @@ fun MainMapScreen(
                                 SheetMode.STAKEOUT -> StakeoutPanel(
                                     stakeout,
                                     crsLabel = projectedCrsLabel,
+                                    projectPoints = activePoints,
                                     onImmersiveRequest = {
                                         stakeoutImmersive = true
                                     },

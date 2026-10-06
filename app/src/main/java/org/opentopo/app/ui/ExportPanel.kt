@@ -1,7 +1,7 @@
 package org.opentopo.app.ui
 
 import android.content.Context
-import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +49,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,7 +61,6 @@ import org.opentopo.app.export.DxfExporter
 import org.opentopo.app.export.GeoJsonExporter
 import org.opentopo.app.export.ShapefileExporter
 import org.opentopo.app.ui.theme.CoordinateFont
-import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -76,6 +74,56 @@ fun ExportPanel(
     var isExporting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun saveToUri(
+        uri: Uri?,
+        label: String,
+        exporter: (List<PointEntity>, ProjectEntity, java.io.OutputStream) -> Unit,
+    ) {
+        val project = selectedProject ?: return
+        if (uri == null) return
+        scope.launch {
+            isExporting = true
+            exportStatus = null
+            try {
+                val count = writeExportToUri(context, db, project, uri, exporter)
+                exportStatus = if (count != null) {
+                    "$label salvo · $count pontos"
+                } else {
+                    "Nenhum ponto para exportar"
+                }
+            } catch (e: Exception) {
+                exportStatus = "Falha ao salvar $label: ${e.message ?: "erro desconhecido"}"
+            } finally {
+                isExporting = false
+            }
+        }
+    }
+
+    val csvSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        saveToUri(uri, "CSV") { points, _, output -> CsvExporter.export(points, output) }
+    }
+    val geoJsonSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/geo+json")
+    ) { uri ->
+        saveToUri(uri, "GeoJSON") { points, project, output ->
+            GeoJsonExporter.export(points, project.name, output)
+        }
+    }
+    val dxfSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/dxf")
+    ) { uri ->
+        saveToUri(uri, "DXF") { points, _, output -> DxfExporter.export(points, output) }
+    }
+    val shpSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        saveToUri(uri, "Shapefile") { points, project, output ->
+            ShapefileExporter.export(points, project, output)
+        }
+    }
 
     Column(
         modifier = modifier
@@ -223,20 +271,7 @@ fun ExportPanel(
                         /* -- CSV (primary export) -- */
                         FilledTonalButton(
                             onClick = {
-                                scope.launch {
-                                    isExporting = true
-                                    exportStatus = null
-                                    val file = doExport(context, db, proj, "csv") { pts, out ->
-                                        CsvExporter.export(pts, out)
-                                    }
-                                    isExporting = false
-                                    if (file != null) {
-                                        shareFile(context, file, "text/csv")
-                                        exportStatus = "CSV shared"
-                                    } else {
-                                        exportStatus = "No points"
-                                    }
-                                }
+                                csvSaveLauncher.launch(exportFileName(proj, "csv"))
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(percent = 50),
@@ -247,26 +282,13 @@ fun ExportPanel(
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("Export CSV")
+                            Text("Salvar CSV")
                         }
 
                         /* -- GeoJSON -- */
                         OutlinedButton(
                             onClick = {
-                                scope.launch {
-                                    isExporting = true
-                                    exportStatus = null
-                                    val file = doExport(context, db, proj, "geojson") { pts, out ->
-                                        GeoJsonExporter.export(pts, proj.name, out)
-                                    }
-                                    isExporting = false
-                                    if (file != null) {
-                                        shareFile(context, file, "application/geo+json")
-                                        exportStatus = "GeoJSON shared"
-                                    } else {
-                                        exportStatus = "No points"
-                                    }
-                                }
+                                geoJsonSaveLauncher.launch(exportFileName(proj, "geojson"))
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.extraLarge,
@@ -277,26 +299,13 @@ fun ExportPanel(
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("Export GeoJSON")
+                            Text("Salvar GeoJSON")
                         }
 
                         /* -- DXF -- */
                         OutlinedButton(
                             onClick = {
-                                scope.launch {
-                                    isExporting = true
-                                    exportStatus = null
-                                    val file = doExport(context, db, proj, "dxf") { pts, out ->
-                                        DxfExporter.export(pts, out)
-                                    }
-                                    isExporting = false
-                                    if (file != null) {
-                                        shareFile(context, file, "application/dxf")
-                                        exportStatus = "DXF shared"
-                                    } else {
-                                        exportStatus = "No points"
-                                    }
-                                }
+                                dxfSaveLauncher.launch(exportFileName(proj, "dxf"))
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.extraLarge,
@@ -307,26 +316,13 @@ fun ExportPanel(
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("Export DXF")
+                            Text("Salvar DXF")
                         }
 
                         /* -- Shapefile ZIP -- */
                         OutlinedButton(
                             onClick = {
-                                scope.launch {
-                                    isExporting = true
-                                    exportStatus = null
-                                    val file = doExport(context, db, proj, "zip") { pts, out ->
-                                        ShapefileExporter.export(pts, proj, out)
-                                    }
-                                    isExporting = false
-                                    if (file != null) {
-                                        shareFile(context, file, "application/zip")
-                                        exportStatus = "Shapefile shared"
-                                    } else {
-                                        exportStatus = "No points"
-                                    }
-                                }
+                                shpSaveLauncher.launch(exportFileName(proj, "zip"))
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.extraLarge,
@@ -337,7 +333,7 @@ fun ExportPanel(
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text("Export Shapefile (.zip)")
+                            Text("Salvar Shapefile (.zip)")
                         }
                     }
                 }
@@ -367,23 +363,22 @@ fun ExportPanel(
     }
 }
 
-private suspend fun doExport(
-    context: Context, db: AppDatabase, project: ProjectEntity, ext: String,
-    exporter: (List<PointEntity>, java.io.OutputStream) -> Unit,
-): File? = withContext(Dispatchers.IO) {
-    val points = db.pointDao().getByProjectOnce(project.id)
-    if (points.isEmpty()) return@withContext null
-    val dir = File(context.cacheDir, "exports").also { it.mkdirs() }
-    val file = File(dir, "${project.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")}.$ext")
-    file.outputStream().use { exporter(points, it) }
-    file
+private fun exportFileName(project: ProjectEntity, ext: String): String {
+    val safe = project.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+    return "$safe.$ext"
 }
 
-private fun shareFile(context: Context, file: File, mimeType: String) {
-    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = mimeType; putExtra(Intent.EXTRA_STREAM, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-    context.startActivity(Intent.createChooser(intent, "Share survey data"))
+private suspend fun writeExportToUri(
+    context: Context,
+    db: AppDatabase,
+    project: ProjectEntity,
+    uri: Uri,
+    exporter: (List<PointEntity>, ProjectEntity, java.io.OutputStream) -> Unit,
+): Int? = withContext(Dispatchers.IO) {
+    val points = db.pointDao().getByProjectOnce(project.id)
+    if (points.isEmpty()) return@withContext null
+    val output = context.contentResolver.openOutputStream(uri, "w")
+        ?: error("Não foi possível abrir o arquivo selecionado")
+    output.use { exporter(points, project, it) }
+    points.size
 }
