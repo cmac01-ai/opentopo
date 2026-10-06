@@ -11,7 +11,7 @@ import org.opentopo.app.ntrip.NtripProfileDao
 
 @Database(
     entities = [ProjectEntity::class, PointEntity::class, TrigPointCacheEntity::class, NtripProfile::class],
-    version = 8,
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -108,6 +108,40 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v8 → v9: persist the coordinate reference system per project.
+         *
+         * Existing projects pre-date SIRGAS support and therefore remain EGSA87.
+         * New projects are created as SIRGAS2000_UTM by ProjectEntity defaults/UI.
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN coordinateSystem TEXT NOT NULL DEFAULT 'EGSA87'")
+                db.execSQL("ALTER TABLE projects ADD COLUMN utmZone INTEGER")
+            }
+        }
+
+        /**
+         * v9 → v10: add UTM hemisphere at project level and persist the
+         * resolved CRS metadata with each observed point.
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE projects ADD COLUMN utmHemisphere TEXT")
+                db.execSQL("ALTER TABLE points ADD COLUMN crsEpsg INTEGER")
+                db.execSQL("ALTER TABLE points ADD COLUMN utmZone INTEGER")
+                db.execSQL("ALTER TABLE points ADD COLUMN utmHemisphere TEXT")
+            }
+        }
+
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE points ADD COLUMN attribute TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE points ADD COLUMN heightModel TEXT")
+                db.execSQL("ALTER TABLE points ADD COLUMN heightUncertainty REAL")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -117,7 +151,8 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                        MIGRATION_9_10, MIGRATION_10_11,
                     )
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }

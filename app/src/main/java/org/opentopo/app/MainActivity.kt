@@ -21,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,15 +34,16 @@ import kotlinx.coroutines.flow.StateFlow
 import org.opentopo.app.db.AppDatabase
 import org.opentopo.app.gnss.BluetoothGnssService
 import org.opentopo.app.gnss.GnssState
+import org.opentopo.app.gnss.GnssKeepAliveService
 import org.opentopo.app.gnss.InternalGnssService
 import org.opentopo.app.gnss.UsbGnssService
+import org.opentopo.app.geoid.GeoidModelService
 import org.opentopo.app.ntrip.NtripClient
 import org.opentopo.app.ntrip.NtripProfileRepository
 import org.opentopo.app.survey.Stakeout
 import org.opentopo.app.survey.SurveyManager
 import org.opentopo.app.ui.MainMapScreen
 import org.opentopo.app.ui.theme.OpenTopoTheme
-import org.opentopo.app.survey.TrigPointService
 
 class MainActivity : ComponentActivity() {
 
@@ -60,9 +62,8 @@ class MainActivity : ComponentActivity() {
         private set
     private var surveyManager: SurveyManager? = null
     private var stakeout: Stakeout? = null
-    private var heposTransform: org.opentopo.transform.HeposTransform? = null
-    lateinit var trigPointService: TrigPointService
-        private set
+    private lateinit var coordinateSystemService: org.opentopo.app.coordinates.CoordinateSystemService
+    private lateinit var geoidModelService: GeoidModelService
 
     /** True when the activity is in picture-in-picture mode. */
     private val _isInPipMode = MutableStateFlow(false)
@@ -98,7 +99,6 @@ class MainActivity : ComponentActivity() {
 
         db = AppDatabase.getInstance(this)
         prefs = org.opentopo.app.prefs.UserPreferences(this)
-        trigPointService = TrigPointService(db.trigPointCacheDao())
         bluetoothService = BluetoothGnssService(this, gnssState)
         usbService = UsbGnssService(this, gnssState)
         internalService = InternalGnssService(this, gnssState)
@@ -134,31 +134,16 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        // NTRIP profile repository — owns the saved-profile list, auto-connects
-        // whenever the active profile changes, and derives the high-level
-        // NtripConnectionState exposed to UI. On first run it migrates the
-        // legacy single-profile DataStore config into a real row and seeds
-        // HEPOS / CivilPOS / SmartNet templates.
+        // NTRIP profile repository — owns saved profiles and ensures the
+        // Brazilian IBGE RBMC-IP template is available.
         ntripProfileRepo = NtripProfileRepository(this, db, ntripClient, prefs)
         lifecycleScope.launch { ntripProfileRepo.seedIfEmpty() }
 
-        // Initialize transform-dependent services
-        try {
-            val deStream = assets.open("dE_2km_V1-0.grd")
-            val dnStream = assets.open("dN_2km_V1-0.grd")
-            surveyManager = SurveyManager(db, gnssState, deStream, dnStream)
-
-            val deStream3 = assets.open("dE_2km_V1-0.grd")
-            val dnStream3 = assets.open("dN_2km_V1-0.grd")
-            val geoidStream = try { assets.open("geoid_hepos07.grd") } catch (_: Exception) { null }
-            heposTransform = org.opentopo.transform.HeposTransform(deStream3, dnStream3, geoidStream)
-
-            val deStream2 = assets.open("dE_2km_V1-0.grd")
-            val dnStream2 = assets.open("dN_2km_V1-0.grd")
-            stakeout = Stakeout(gnssState, deStream2, dnStream2)
-        } catch (_: Exception) {
-            // Grid files missing — transform features disabled
-        }
+        // Brazilian build: SIRGAS2000 / UTM does not require correction grids.
+        coordinateSystemService = org.opentopo.app.coordinates.CoordinateSystemService(null)
+        geoidModelService = GeoidModelService(this)
+        surveyManager = SurveyManager(db, gnssState, coordinateSystemService, geoidModelService)
+        stakeout = Stakeout(gnssState, coordinateSystemService)
 
         // Feed GNSS position to NtripClient continuously for GGA generation
         CoroutineScope(Dispatchers.Default).launch {
@@ -189,6 +174,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
             launch {
+                prefs.heightModel.collect { model ->
+                    surveyManager?.heightModel = model
+                }
+            }
+            launch {
                 prefs.ggaIntervalSeconds.collect { seconds ->
                     ntripClient.ggaIntervalMs = seconds * 1000L
                 }
@@ -197,6 +187,31 @@ class MainActivity : ComponentActivity() {
 
         requestPermissionsIfNeeded()
         registerUsbReceiver()
+
+        lifecycleScope.launch {
+            combine(
+                gnssState.activeTransport,
+                gnssState.connectionStatus,
+            ) { transport, status -> transport to status }
+                .collect { (transport, status) ->
+                    val externalSession =
+                        (transport == org.opentopo.app.gnss.Transport.BLUETOOTH ||
+                            transport == org.opentopo.app.gnss.Transport.USB) &&
+                            status != org.opentopo.app.gnss.ConnectionStatus.DISCONNECTED
+                    if (externalSession) {
+                        try {
+                            ContextCompat.startForegroundService(
+                                this@MainActivity,
+                                Intent(this@MainActivity, GnssKeepAliveService::class.java),
+                            )
+                        } catch (_: SecurityException) {
+                            // Permission may still be pending on first launch.
+                        }
+                    } else {
+                        stopService(Intent(this@MainActivity, GnssKeepAliveService::class.java))
+                    }
+                }
+        }
 
         setContent {
             val gloveMode by prefs.gloveMode.collectAsState(initial = false)
@@ -211,8 +226,6 @@ class MainActivity : ComponentActivity() {
                     db = db,
                     surveyManager = surveyManager,
                     stakeout = stakeout,
-                    heposTransform = heposTransform,
-                    trigPointService = trigPointService,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -275,6 +288,7 @@ class MainActivity : ComponentActivity() {
         bluetoothService.disconnect()
         usbService.destroy()
         internalService.disconnect()
+        stopService(Intent(this, GnssKeepAliveService::class.java))
         try {
             unregisterReceiver(usbReceiver)
         } catch (_: IllegalArgumentException) {
@@ -355,6 +369,10 @@ class MainActivity : ComponentActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED
         ) needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) needed.add(Manifest.permission.POST_NOTIFICATIONS)
         if (needed.isNotEmpty()) {
             permissionLauncher.launch(needed.toTypedArray())
         }

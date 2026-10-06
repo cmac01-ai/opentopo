@@ -4,6 +4,12 @@
     <!-- Vibration (haptic feedback) -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Keep GNSS/NTRIP active while screen is off -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Bluetooth -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
@@ -42,6 +48,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <service
+            android:name=".gnss.GnssKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <activity
             android:name=".MainActivity"

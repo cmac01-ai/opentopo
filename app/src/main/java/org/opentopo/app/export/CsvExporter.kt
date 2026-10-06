@@ -8,7 +8,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Exports survey points to CSV with both WGS84 and GGRS87/EGSA87 coordinates.
+ * Exports survey points with SIRGAS2000/UTM metadata.
  */
 object CsvExporter {
 
@@ -16,23 +16,35 @@ object CsvExporter {
 
     fun export(points: List<PointEntity>, output: OutputStream) {
         val writer = OutputStreamWriter(output, Charsets.UTF_8)
-        writer.write("ID,Easting_EGSA87,Northing_EGSA87,Latitude_WGS84,Longitude_WGS84,Altitude,Ortho_Height,Geoid_N,H_Accuracy,V_Accuracy,Fix,Satellites,HDOP,Averaging_s,DateTime,Remarks\n")
+        writer.write(
+            "ID,Attribute,Easting_UTM,Northing_UTM,EPSG,UTM_Zone,Hemisphere," +
+                "Latitude_SIRGAS2000,Longitude_SIRGAS2000,Ellipsoidal_Height,Physical_Height," +
+                "Height_Model,Height_Factor,Height_Uncertainty,Antenna_Height," +
+                "H_Accuracy,V_Accuracy,Fix,Satellites,HDOP,Averaging_s,DateTime,Remarks\n"
+        )
 
         for (p in points) {
             writer.write(buildString {
                 append(p.pointId).append(',')
-                append(p.easting?.let { "%.3f".format(it) } ?: "").append(',')
-                append(p.northing?.let { "%.3f".format(it) } ?: "").append(',')
-                append("%.10f".format(p.latitude)).append(',')
-                append("%.10f".format(p.longitude)).append(',')
-                append(p.altitude?.let { "%.3f".format(it) } ?: "").append(',')
-                append(p.orthometricHeight?.let { "%.3f".format(it) } ?: "").append(',')
-                append(p.geoidSeparation?.let { "%.3f".format(it) } ?: "").append(',')
-                append(p.horizontalAccuracy?.let { "%.3f".format(it) } ?: "").append(',')
-                append(p.verticalAccuracy?.let { "%.3f".format(it) } ?: "").append(',')
+                append(escapeCsv(p.attribute)).append(',')
+                append(p.easting?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.northing?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.crsEpsg ?: "").append(',')
+                append(p.utmZone ?: "").append(',')
+                append(p.utmHemisphere ?: "").append(',')
+                append("%.10f".format(Locale.US, p.latitude)).append(',')
+                append("%.10f".format(Locale.US, p.longitude)).append(',')
+                append(p.altitude?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.orthometricHeight?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.heightModel ?: "").append(',')
+                append(p.geoidSeparation?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.heightUncertainty?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.antennaHeight?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.horizontalAccuracy?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
+                append(p.verticalAccuracy?.let { "%.3f".format(Locale.US, it) } ?: "").append(',')
                 append(fixLabel(p.fixQuality)).append(',')
                 append(p.numSatellites).append(',')
-                append(p.hdop?.let { "%.1f".format(it) } ?: "").append(',')
+                append(p.hdop?.let { "%.1f".format(Locale.US, it) } ?: "").append(',')
                 append(p.averagingSeconds).append(',')
                 append(dateFormat.format(Date(p.timestamp))).append(',')
                 append(escapeCsv(p.remarks))

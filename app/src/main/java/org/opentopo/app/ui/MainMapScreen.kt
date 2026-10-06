@@ -160,6 +160,8 @@ fun MainMapScreen(
     val ntripState by ntripClient.state.collectAsState()
     val projectedCoords by surveyManager?.projectedPosition?.collectAsState()
         ?: remember { mutableStateOf(null) }
+    val projectedCrsLabel by surveyManager?.projectedCrsLabel?.collectAsState()
+        ?: remember { mutableStateOf("SIRGAS2000 · UTM") }
     val recordingState =
         surveyManager?.recordingState?.collectAsState()?.value ?: RecordingState()
     val context = LocalContext.current
@@ -582,11 +584,12 @@ fun MainMapScreen(
 
                 Spacer(Modifier.height(10.dp))
 
-                // ── v2 peek content: EGSA87 CoordinateBlock (no pill — pill lives up top) ──
+                // ── v2 peek content: active project CRS CoordinateBlock ──
                 PeekCoordinates(
                     position = position,
                     accuracy = accuracy,
                     projectedCoords = projectedCoords,
+                    crsLabel = projectedCrsLabel,
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -650,6 +653,8 @@ fun MainMapScreen(
                                 SheetMode.SURVEY -> SurveyPanel(db, surveyManager)
                                 SheetMode.STAKEOUT -> StakeoutPanel(
                                     stakeout,
+                                    crsLabel = projectedCrsLabel,
+                                    projectPoints = activePoints,
                                     onImmersiveRequest = {
                                         stakeoutImmersive = true
                                     },
@@ -755,22 +760,19 @@ fun MainMapScreen(
         },
     ) { paddingValues ->
         // ── Map fills the screen ──
-        var orthoVisible by remember { mutableStateOf(false) }
-        var contoursVisible by remember { mutableStateOf(true) }
-
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             AndroidView(
                 factory = { ctx ->
                     MapView(ctx).apply {
                         getMapAsync { map ->
-                            // Load vathra.xyz vector basemap style from assets
-                            val styleJson = ctx.assets.open("style_vathra.json")
+                            // Brazilian build: neutral OpenStreetMap raster basemap.
+                            val styleJson = ctx.assets.open("style_brazil.json")
                                 .bufferedReader().readText()
                             map.setStyle(
                                 org.maplibre.android.maps.Style.Builder()
                                     .fromJson(styleJson),
                             ) { style ->
-                                // Initial camera: try to use last known GPS, fallback to Greece center
+                                // Initial camera: try to use last known GPS, fallback to Brazil overview
                                 val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE) as? android.location.LocationManager
                                 val lastLoc = try {
                                     if (androidx.core.content.ContextCompat.checkSelfPermission(
@@ -784,7 +786,7 @@ fun MainMapScreen(
                                 val (initLat, initLng, initZoom) = if (lastLoc != null) {
                                     Triple(lastLoc.latitude, lastLoc.longitude, 15.0)
                                 } else {
-                                    Triple(38.5, 23.8, 7.0)
+                                    Triple(-14.235, -51.925, 4.0)
                                 }
                                 map.cameraPosition = CameraPosition.Builder()
                                     .target(LatLng(initLat, initLng)).zoom(initZoom).build()
@@ -798,7 +800,7 @@ fun MainMapScreen(
                                 // Add user location source + layers
                                 val locationSource = GeoJsonSource(
                                     "user-location",
-                                    Point.fromLngLat(23.8, 38.5),
+                                    Point.fromLngLat(-51.925, -14.235),
                                 )
                                 style.addSource(locationSource)
 
@@ -960,23 +962,6 @@ fun MainMapScreen(
                                     "survey-polygons-layer",
                                 )
 
-                                // Prepare Ktimatologio orthophoto WMS as hidden raster source
-                                val ktimaSource = RasterSource(
-                                    "ktima-ortho",
-                                    TileSet(
-                                        "2.2.0",
-                                        "http://gis.ktimanet.gr/wms/wmsopen/wmsserver.aspx?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=BASEMAP&SRS=EPSG:900913&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg",
-                                    ),
-                                    256,
-                                )
-                                style.addSource(ktimaSource)
-                                style.addLayerBelow(
-                                    RasterLayer("ktima-ortho-layer", "ktima-ortho")
-                                        .withProperties(
-                                            PropertyFactory.visibility(org.maplibre.android.style.layers.Property.NONE),
-                                        ),
-                                    "survey-polygons-layer",  // below all survey layers
-                                )
 
                             }
                             // Load trig points on camera idle
@@ -1127,14 +1112,6 @@ fun MainMapScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Trig Points (GYS)") },
-                            leadingIcon = { Icon(Icons.Outlined.PinDrop, null) },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                sheetMode = SheetMode.TRIG
-                            },
-                        )
-                        DropdownMenuItem(
                             text = { Text("More") },
                             leadingIcon = { Icon(Icons.Outlined.Tune, null) },
                             onClick = {
@@ -1148,64 +1125,6 @@ fun MainMapScreen(
                             onClick = {
                                 overflowMenuExpanded = false
                                 sheetMode = SheetMode.EXPORT
-                            },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("Layer: Ortho") },
-                            leadingIcon = {
-                                if (orthoVisible) Icon(Icons.Filled.Check, null, Modifier.size(18.dp))
-                                else Icon(Icons.Outlined.Layers, null, Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                orthoVisible = !orthoVisible
-                                val newVis = if (orthoVisible)
-                                    org.maplibre.android.style.layers.Property.VISIBLE
-                                else
-                                    org.maplibre.android.style.layers.Property.NONE
-                                mapRef?.style?.getLayer("ktima-ortho-layer")?.setProperties(
-                                    PropertyFactory.visibility(newVis),
-                                )
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Layer: Contours") },
-                            leadingIcon = {
-                                if (contoursVisible) Icon(Icons.Filled.Check, null, Modifier.size(18.dp))
-                                else Icon(Icons.Outlined.Layers, null, Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                contoursVisible = !contoursVisible
-                                val newVis = if (contoursVisible)
-                                    org.maplibre.android.style.layers.Property.VISIBLE
-                                else
-                                    org.maplibre.android.style.layers.Property.NONE
-                                mapRef?.style?.getLayer("contours-lines")?.setProperties(PropertyFactory.visibility(newVis))
-                                mapRef?.style?.getLayer("contours-labels")?.setProperties(PropertyFactory.visibility(newVis))
-                            },
-                        )
-                        HorizontalDivider()
-                        // Trig points are an *overlay*, not a basemap layer — they sit
-                        // on top of whichever layer combo (ortho / contours / both) the
-                        // user has active. Separated from the "Layer:" items visually
-                        // to make that clear.
-                        DropdownMenuItem(
-                            text = { Text("Show Trig Points (GYS)") },
-                            leadingIcon = {
-                                if (trigPointsVisible) Icon(Icons.Filled.Check, null, Modifier.size(18.dp))
-                                else Icon(Icons.Outlined.PinDrop, null, Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                overflowMenuExpanded = false
-                                trigPointsVisible = !trigPointsVisible
-                                val newVis = if (trigPointsVisible)
-                                    org.maplibre.android.style.layers.Property.VISIBLE
-                                else
-                                    org.maplibre.android.style.layers.Property.NONE
-                                mapRef?.style?.getLayer("trig-points-circle")?.setProperties(PropertyFactory.visibility(newVis))
-                                mapRef?.style?.getLayer("trig-points-labels")?.setProperties(PropertyFactory.visibility(newVis))
                             },
                         )
                     }
@@ -1261,30 +1180,14 @@ fun MainMapScreen(
                             )
                         }
                     }
-                    // 2. Layers — cycle through basemap layer combinations
+                    // 2. Basemap — Brazilian build currently uses OpenStreetMap.
                     Surface(
                         onClick = {
-                            val newOrtho: Boolean
-                            val newContours: Boolean
-                            when {
-                                !orthoVisible && !contoursVisible -> { newOrtho = false; newContours = true }
-                                !orthoVisible && contoursVisible -> { newOrtho = true; newContours = false }
-                                orthoVisible && !contoursVisible -> { newOrtho = true; newContours = true }
-                                else -> { newOrtho = false; newContours = false }
-                            }
-                            orthoVisible = newOrtho
-                            contoursVisible = newContours
-                            mapRef?.style?.getLayer("ktima-ortho-layer")?.setProperties(
-                                PropertyFactory.visibility(
-                                    if (newOrtho) org.maplibre.android.style.layers.Property.VISIBLE
-                                    else org.maplibre.android.style.layers.Property.NONE,
-                                ),
-                            )
-                            val contourVis = if (newContours)
-                                org.maplibre.android.style.layers.Property.VISIBLE
-                            else org.maplibre.android.style.layers.Property.NONE
-                            mapRef?.style?.getLayer("contours-lines")?.setProperties(PropertyFactory.visibility(contourVis))
-                            mapRef?.style?.getLayer("contours-labels")?.setProperties(PropertyFactory.visibility(contourVis))
+                            android.widget.Toast.makeText(
+                                context,
+                                "Mapa base: OpenStreetMap",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
                         },
                         shape = RoundedCornerShape(22.dp),
                         color = androidx.compose.ui.graphics.Color.Transparent,
@@ -1294,7 +1197,7 @@ fun MainMapScreen(
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 Icons.Outlined.Layers,
-                                contentDescription = "Cycle basemap",
+                                contentDescription = "OpenStreetMap",
                             )
                         }
                     }
@@ -1570,8 +1473,8 @@ fun MainMapScreen(
     if (ntripProfileCreating || ntripProfileEditing != null) {
         NtripProfileEditScreen(
             initial = ntripProfileEditing,
-            onScanSourcetable = { host, port, user, pass ->
-                ntripProfileRepo.scanSourcetable(host, port, user, pass)
+            onScanSourcetable = { host, port, user, pass, useTls ->
+                ntripProfileRepo.scanSourcetable(host, port, user, pass, useTls)
             },
             onSave = { updated ->
                 scope.launch { ntripProfileRepo.upsert(updated) }
@@ -1627,11 +1530,11 @@ fun MainMapScreen(
                 ToolsPanel(
                     db = db,
                     surveyManager = surveyManager,
-                    transform = heposTransform,
                     onOpenCoordConverter = { transformScreenOpen = true },
-                    onOpenGysSearch = {
+                    onOpenRbmc = {
                         moreScreenOpen = false
-                        sheetMode = SheetMode.TRIG
+                        sheetMode = SheetMode.CONNECTION
+                        ntripSwitchSheetOpen = true
                     },
                     onOpenImport = {
                         moreScreenOpen = false
@@ -1646,11 +1549,10 @@ fun MainMapScreen(
                         sheetMode = SheetMode.SURVEY
                         android.widget.Toast.makeText(
                             context,
-                            "Switch to Polygon mode in Survey to see live area + perimeter",
+                            "Use o modo Polígono em Levantamento para área e perímetro.",
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     },
-                    onOpenTransformPipeline = { transformScreenOpen = true },
                     onOpenSettings = { settingsScreenOpen = true },
                     onOpenRecentActivity = {
                         moreScreenOpen = false
@@ -1659,7 +1561,7 @@ fun MainMapScreen(
                     onOpenWhatsNew = {
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/CHANGELOG.md"),
+                            android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/sirgas2000-brazil/CHANGELOG.md"),
                         )
                         context.startActivity(intent)
                     },
@@ -1673,22 +1575,54 @@ fun MainMapScreen(
         androidx.activity.compose.BackHandler(enabled = true) {
             settingsScreenOpen = false
         }
-        val amoledPref by (activity?.prefs?.preferReceiverGeoid?.collectAsState(initial = false)
-            ?: remember { mutableStateOf(false) })
-        val requireRtk by (surveyManager?.let {
-            activity?.prefs?.requireRtkFix?.collectAsState(initial = false)
-        } ?: remember { mutableStateOf(false) })
-        SettingsScreen(
-            userName = "",
-            userOrg = "",
-            amoledEnabled = amoledPref,
-            requireRtkFix = requireRtk,
-            onAmoledChange = { /* stub: AMOLED theme flag not yet in UserPreferences */ },
-            onRequireRtkChange = { v ->
-                scope.launch { activity?.prefs?.setRequireRtkFix(v) }
-            },
-            onBack = { settingsScreenOpen = false },
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.systemBars),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Surface(
+                        onClick = { settingsScreenOpen = false },
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Voltar")
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "MAIS · CONFIGURAÇÕES",
+                            fontFamily = CoordinateFont,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "Configurações",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                SettingsPanel(
+                    db = db,
+                    surveyManager = surveyManager,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
     }
 
     if (aboutScreenOpen) {
@@ -1703,34 +1637,34 @@ fun MainMapScreen(
             onSourceCodeClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo"),
                 )
                 context.startActivity(intent)
             },
             onDocsClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/README.md"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/main/README.md"),
                 )
                 context.startActivity(intent)
             },
             onPrivacyClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/PRIVACY_POLICY.md"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/main/PRIVACY_POLICY.md"),
                 )
                 context.startActivity(intent)
             },
             onWhatsNewClick = {
                 val intent = android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse("https://github.com/ppapadeas/opentopo/blob/main/CHANGELOG.md"),
+                    android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/blob/main/CHANGELOG.md"),
                 )
                 context.startActivity(intent)
             },
             onContactClick = {
                 val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
-                    data = android.net.Uri.parse("mailto:pierros@papadeas.gr")
+                    data = android.net.Uri.parse("https://github.com/cmac01-ai/opentopo/issues")
                 }
                 context.startActivity(intent)
             },
@@ -1747,7 +1681,7 @@ fun MainMapScreen(
     // Transform pipeline inspector — full-screen overlay wrapping the existing
     // TransformPanel with a back button. This replaces the transform inspector
     // that used to live inline in ToolsPanel before the v2.0 More-Hub rewrite.
-    if (transformScreenOpen && heposTransform != null) {
+    if (transformScreenOpen) {
         androidx.activity.compose.BackHandler(enabled = true) {
             transformScreenOpen = false
         }
@@ -1793,7 +1727,7 @@ fun MainMapScreen(
                         )
                     }
                 }
-                TransformPanel(transform = heposTransform)
+                TransformPanel()
             }
         }
     }
@@ -1870,14 +1804,14 @@ private fun InlineShortNavBar(
 }
 
 /**
- * v2 peek card. Shows the projected EGSA87 coordinate as a `CoordinateBlock` with the
- * fix pill + σH footer, followed by a thin WGS84 secondary row below.
+ * v2 peek card. Shows coordinates in the active project's projected CRS.
  */
 @Composable
 private fun PeekCoordinates(
     position: org.opentopo.app.gnss.PositionState,
     accuracy: org.opentopo.app.gnss.AccuracyState,
     projectedCoords: org.opentopo.transform.ProjectedCoordinate?,
+    crsLabel: String,
 ) {
     val sigmaH = accuracy.horizontalAccuracyM
     val sigmaV = accuracy.altitudeErrorM
@@ -1896,7 +1830,7 @@ private fun PeekCoordinates(
         }
         val heightStr = ellipsoidal?.let { "${"%.3f".format(it)} m" }
         CoordinateBlock(
-            label = "EGSA87 \u00B7 EPSG 2100",
+            label = crsLabel,
             easting = "${"%.3f".format(projectedCoords.eastingM)} m",
             northing = "${"%.3f".format(projectedCoords.northingM)} m",
             height = heightStr,
@@ -1904,9 +1838,9 @@ private fun PeekCoordinates(
             sigmaH = sigmaFooter,
         )
     } else {
-        // No fix yet — show a placeholder EGSA87 block with empty values.
+        // No fix yet — show a placeholder for the active project CRS.
         CoordinateBlock(
-            label = "EGSA87 \u00B7 EPSG 2100",
+            label = crsLabel,
             easting = "\u2014",
             northing = "\u2014",
             height = null,
@@ -1982,6 +1916,9 @@ private fun NewProjectHeaderDialog(
 ) {
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var coordinateSystem by remember { mutableStateOf("SIRGAS2000_UTM") }
+    var utmZone by remember { mutableStateOf<Int?>(null) }
+    var utmHemisphere by remember { mutableStateOf("AUTO") }
     val scope = rememberCoroutineScope()
 
     androidx.compose.material3.AlertDialog(
@@ -1993,23 +1930,100 @@ private fun NewProjectHeaderDialog(
                 tint = MaterialTheme.colorScheme.primary,
             )
         },
-        title = { Text("New Project") },
+        title = { Text("Novo projeto") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 androidx.compose.material3.OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name") },
+                    label = { Text("Nome") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 androidx.compose.material3.OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
+                    label = { Text("Descrição") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+
+                Text(
+                    "Sistema: SIRGAS2000 / UTM",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+
+                    var hemisphereExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { hemisphereExpanded = true }) {
+                            Text(
+                                when (utmHemisphere) {
+                                    "NORTH" -> "Hemisfério: Norte"
+                                    "SOUTH" -> "Hemisfério: Sul"
+                                    else -> "Hemisfério: Automático"
+                                }
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = hemisphereExpanded,
+                            onDismissRequest = { hemisphereExpanded = false },
+                        ) {
+                            listOf(
+                                "AUTO" to "Automático pela latitude",
+                                "NORTH" to "Norte",
+                                "SOUTH" to "Sul",
+                            ).forEach { (value, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        utmHemisphere = value
+                                        if (value == "NORTH" && (utmZone ?: 18) > 22) {
+                                            utmZone = null
+                                        }
+                                        hemisphereExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    var zoneExpanded by remember { mutableStateOf(false) }
+                    val zoneSuffix = when (utmHemisphere) {
+                        "NORTH" -> "N"
+                        "SOUTH" -> "S"
+                        else -> ""
+                    }
+                    Box {
+                        TextButton(onClick = { zoneExpanded = true }) {
+                            Text(
+                                utmZone?.let { "UTM ${it}$zoneSuffix" }
+                                    ?: "Fuso UTM: automático"
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = zoneExpanded,
+                            onDismissRequest = { zoneExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Automático pela longitude") },
+                                onClick = {
+                                    utmZone = null
+                                    zoneExpanded = false
+                                },
+                            )
+                            val zones = if (utmHemisphere == "NORTH") 18..22 else 18..25
+                            zones.forEach { zone ->
+                                DropdownMenuItem(
+                                    text = { Text("UTM ${zone}$zoneSuffix") },
+                                    onClick = {
+                                        utmZone = zone
+                                        zoneExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
             }
         },
         confirmButton = {
@@ -2020,6 +2034,9 @@ private fun NewProjectHeaderDialog(
                             val project = org.opentopo.app.db.ProjectEntity(
                                 name = name,
                                 description = description,
+                                coordinateSystem = coordinateSystem,
+                                utmZone = utmZone,
+                                utmHemisphere = utmHemisphere,
                             )
                             val id = db.projectDao().insert(project)
                             surveyManager?.setActiveProject(id)
@@ -2029,12 +2046,12 @@ private fun NewProjectHeaderDialog(
                 },
                 enabled = name.isNotBlank(),
             ) {
-                Text("Create")
+                Text("Criar")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancelar")
             }
         },
     )

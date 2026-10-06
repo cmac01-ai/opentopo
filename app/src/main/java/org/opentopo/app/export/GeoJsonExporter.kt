@@ -8,8 +8,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Exports survey points as GeoJSON FeatureCollection.
- * Coordinates are in EGSA87/GGRS87 (EPSG:2100).
+ * Exports RFC 7946 style GeoJSON using longitude/latitude geometry.
+ * SIRGAS2000/UTM values are preserved as feature properties.
  */
 object GeoJsonExporter {
 
@@ -20,36 +20,37 @@ object GeoJsonExporter {
 
         writer.write("""{"type":"FeatureCollection","name":""")
         writer.write(jsonString(projectName))
-        writer.write(""","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:EPSG::2100"}}""")
         writer.write(""","features":[""")
 
         points.forEachIndexed { index, p ->
             if (index > 0) writer.write(",")
             writer.write("""{"type":"Feature","properties":{""")
             writer.write(""""id":${jsonString(p.pointId)}""")
-            writer.write(""","lat_wgs84":${p.latitude}""")
-            writer.write(""","lon_wgs84":${p.longitude}""")
-            p.altitude?.let { writer.write(""","altitude":${"%.3f".format(it)}""") }
-            p.orthometricHeight?.let { writer.write(""","ortho_height":${"%.3f".format(it)}""") }
-            p.geoidSeparation?.let { writer.write(""","geoid_n":${"%.3f".format(it)}""") }
-            p.horizontalAccuracy?.let { writer.write(""","h_accuracy":${"%.3f".format(it)}""") }
-            p.verticalAccuracy?.let { writer.write(""","v_accuracy":${"%.3f".format(it)}""") }
-            writer.write(""","fix":"${fixLabel(p.fixQuality)}"""")
+            if (p.attribute.isNotBlank()) writer.write(""","attribute":${jsonString(p.attribute)}""")
+            writer.write(""","reference_system":"SIRGAS2000"""")
+            p.easting?.let { writer.write(""","easting_utm":${"%.3f".format(Locale.US, it)}""") }
+            p.northing?.let { writer.write(""","northing_utm":${"%.3f".format(Locale.US, it)}""") }
+            p.crsEpsg?.let { writer.write(""","epsg":$it""") }
+            p.utmZone?.let { writer.write(""","utm_zone":$it""") }
+            p.utmHemisphere?.let { writer.write(""","hemisphere":${jsonString(it)}""") }
+            p.altitude?.let { writer.write(""","ellipsoidal_height":${"%.3f".format(Locale.US, it)}""") }
+            p.orthometricHeight?.let { writer.write(""","physical_height":${"%.3f".format(Locale.US, it)}""") }
+            p.heightModel?.let { writer.write(""","height_model":${jsonString(it)}""") }
+            p.geoidSeparation?.let { writer.write(""","height_factor":${"%.3f".format(Locale.US, it)}""") }
+            p.heightUncertainty?.let { writer.write(""","height_uncertainty":${"%.3f".format(Locale.US, it)}""") }
+            p.antennaHeight?.let { writer.write(""","antenna_height":${"%.3f".format(Locale.US, it)}""") }
+            p.horizontalAccuracy?.let { writer.write(""","h_accuracy":${"%.3f".format(Locale.US, it)}""") }
+            p.verticalAccuracy?.let { writer.write(""","v_accuracy":${"%.3f".format(Locale.US, it)}""") }
+            writer.write(""","fix":${jsonString(fixLabel(p.fixQuality))}""")
             writer.write(""","satellites":${p.numSatellites}""")
             writer.write(""","timestamp":${jsonString(dateFormat.format(Date(p.timestamp)))}""")
-            if (p.remarks.isNotBlank()) {
-                writer.write(""","remarks":${jsonString(p.remarks)}""")
-            }
-            writer.write("}")  // end properties
+            if (p.remarks.isNotBlank()) writer.write(""","remarks":${jsonString(p.remarks)}""")
+            writer.write("}")
 
-            val e = p.easting
-            val n = p.northing
-            if (e != null && n != null) {
-                writer.write(""","geometry":{"type":"Point","coordinates":[${"%.3f".format(e)},${"%.3f".format(n)}]}""")
-            } else {
-                writer.write(""","geometry":null""")
-            }
-            writer.write("}")  // end feature
+            writer.write(
+                ""","geometry":{"type":"Point","coordinates":[${"%.10f".format(Locale.US, p.longitude)},${"%.10f".format(Locale.US, p.latitude)}]}"""
+            )
+            writer.write("}")
         }
 
         writer.write("]}")

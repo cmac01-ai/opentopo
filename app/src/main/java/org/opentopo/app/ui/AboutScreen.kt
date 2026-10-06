@@ -68,9 +68,9 @@ fun AboutScreen(
     buildNumber: String = "2087",
     license: String = "AGPLv3",
     updateStatus: AboutUpdateStatus = AboutUpdateStatus.UpToDate,
-    statsGys: String = "25,259",
-    statsContributors: String = "47",
-    statsYears: String = "6 y",
+    statsGys: String = "SIRGAS",
+    statsContributors: String = "18–25",
+    statsYears: String = "AGPL",
     onBack: () -> Unit,
     onWhatsNewClick: () -> Unit = {},
     onDocsClick: () -> Unit = {},
@@ -239,9 +239,9 @@ fun AboutScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                StatCell(value = statsGys, label = "GYS PILLARS", modifier = Modifier.weight(1f))
-                StatCell(value = statsContributors, label = "CONTRIBUTORS", modifier = Modifier.weight(1f))
-                StatCell(value = statsYears, label = "IN THE FIELD", modifier = Modifier.weight(1f))
+                StatCell(value = statsGys, label = "REFERENCIAL", modifier = Modifier.weight(1f))
+                StatCell(value = statsContributors, label = "FUSOS SUL", modifier = Modifier.weight(1f))
+                StatCell(value = statsYears, label = "OPEN SOURCE", modifier = Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(14.dp))
@@ -261,13 +261,13 @@ fun AboutScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     LinkRow(
                         title = "Documentation",
-                        sub = "docs.opentopo.gr",
+                        sub = "GitHub · documentação do projeto",
                         onClick = onDocsClick,
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     LinkRow(
                         title = "Source code",
-                        sub = "github.com/opentopo/opentopo",
+                        sub = "github.com/cmac01-ai/opentopo",
                         onClick = onSourceCodeClick,
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -285,7 +285,7 @@ fun AboutScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     LinkRow(
                         title = "Contact the team",
-                        sub = "team@opentopo.gr",
+                        sub = "Issues do fork no GitHub",
                         onClick = onContactClick,
                     )
                 }
@@ -304,14 +304,14 @@ fun AboutScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = "BUILT WITH \u2764 IN GREECE",
+                        text = "ADAPTAÇÃO PARA USO NO BRASIL",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.1.em,
                         color = MaterialTheme.colorScheme.onTertiaryContainer,
                     )
                     Text(
-                        text = "Data from HEPOS / Ktimatologio. GYS archive by vathra.xyz. Typography by Google Fonts.",
+                        text = "SIRGAS2000 / UTM · RBMC-IP do IBGE · OpenStreetMap · GNSS RTK por NMEA/RTCM.",
                         fontSize = 12.sp,
                         lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onTertiaryContainer,

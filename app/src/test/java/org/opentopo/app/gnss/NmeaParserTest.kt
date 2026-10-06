@@ -119,6 +119,49 @@ class NmeaParserTest {
         assertEquals(2.1, gsa.vdop)
     }
 
+    @Test
+    fun `parse GN GSA system id from u-blox NMEA 4_10`() {
+        var result: GsaData? = null
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGsa(data: GsaData) { result = data }
+        })
+
+        parser.parseLine("\$GNGSA,A,3,04,05,,09,12,,,24,,,,,2.5,1.3,2.1,1*3A")
+
+        assertNotNull(result)
+        assertEquals(Constellation.GPS, result!!.constellation)
+        assertEquals(listOf(4, 5, 9, 12, 24), result!!.satellitePrns)
+    }
+
+    @Test
+    fun `infer GN GSA constellation from extended satellite numbering when system id is absent`() {
+        var result: GsaData? = null
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGsa(data: GsaData) { result = data }
+        })
+
+        parser.parseLine("\$GNGSA,A,3,04,05,,09,12,,,24,,,,,2.5,1.3,2.1*27")
+
+        assertNotNull(result)
+        assertEquals(Constellation.GPS, result!!.constellation)
+        assertEquals(listOf(4, 5, 9, 12, 24), result!!.satellitePrns)
+    }
+
+    @Test
+    fun `parse GSV signal id without treating it as a satellite field`() {
+        var result: GsvData? = null
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGsv(data: GsvData) { result = data }
+        })
+
+        parser.parseLine("\$GPGSV,1,1,01,04,45,120,40,1*57")
+
+        assertNotNull(result)
+        assertEquals(1, result!!.signalId)
+        assertEquals(1, result!!.satellites.size)
+        assertEquals(4, result!!.satellites.first().prn)
+    }
+
     // ── GSV ──
 
     @Test
@@ -213,4 +256,33 @@ class NmeaParserTest {
         assertEquals(1, ggaCount)
         assertEquals(1, rmcCount)
     }
+
+    @Test
+    fun `feed resynchronises after binary bytes before NMEA`() {
+        var count = 0
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGga(data: GgaData) { count++ }
+        })
+
+        val binary = byteArrayOf(0xB5.toByte(), 0x62, 0x01, 0x07, 0x10, 0x20, 0x30)
+        val gga = "\u0024GPGGA,092750.000,5321.6802,N,00630.3372,W,1,8,1.03,61.7,M,55.2,M,,*76\r\n"
+        parser.feed(binary + gga.toByteArray())
+
+        assertEquals(1, count)
+    }
+
+    @Test
+    fun `feed recovers after binary interrupts partial NMEA`() {
+        var count = 0
+        val parser = NmeaParser(object : NmeaListener {
+            override fun onGga(data: GgaData) { count++ }
+        })
+
+        parser.feed("\u0024GPGGA,0927".toByteArray())
+        parser.feed(byteArrayOf(0xB5.toByte(), 0x62))
+        parser.feed("\u0024GPGGA,092750.000,5321.6802,N,00630.3372,W,1,8,1.03,61.7,M,55.2,M,,*76\r\n".toByteArray())
+
+        assertEquals(1, count)
+    }
+
 }
