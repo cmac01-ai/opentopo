@@ -944,8 +944,19 @@ private fun PointCard(point: PointEntity, db: AppDatabase) {
                 )
                 // Height info
                 val heightText = buildString {
-                    point.orthometricHeight?.let { append("H=${"%.3f".format(it)}") }
-                    point.geoidSeparation?.let { append(" N=${"%.2f".format(it)}") }
+                    point.orthometricHeight?.let { height ->
+                        val prefix = if (
+                            point.heightModel == org.opentopo.app.geoid.HeightModels.HGEONOR2020_IMBITUBA
+                        ) "HN" else "H"
+                        append("$prefix=${"%.3f".format(height)}")
+                    }
+                    point.geoidSeparation?.let { factor ->
+                        if (isNotEmpty()) append(" ")
+                        val prefix = if (
+                            point.heightModel == org.opentopo.app.geoid.HeightModels.HGEONOR2020_IMBITUBA
+                        ) "η" else "N"
+                        append("$prefix=${"%.2f".format(factor)}")
+                    }
                 }
                 if (heightText.isNotBlank()) {
                     Text(

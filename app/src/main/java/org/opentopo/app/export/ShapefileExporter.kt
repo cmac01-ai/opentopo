@@ -133,7 +133,8 @@ object ShapefileExporter {
     private fun buildDbf(points: List<PointEntity>): ByteArray {
         // DBF with fields: ID (C,10), EASTING (N,12,3), NORTHING (N,12,3), ELEV (N,10,3), FIX (N,2,0), REMARKS (C,50)
         val fields = listOf(
-            DbfField("ID", 'C', 10, 0),
+            DbfField("ID", 'C', 16, 0),
+            DbfField("ATTRIBUTE", 'C', 24, 0),
             DbfField("EASTING", 'N', 12, 3),
             DbfField("NORTHING", 'N', 12, 3),
             DbfField("ELEVATION", 'N', 10, 3),
@@ -173,7 +174,14 @@ object ShapefileExporter {
         // Records
         for (pt in points) {
             dos.writeByte(0x20) // not deleted
-            dos.write(pt.pointId.padEnd(10).substring(0, 10).toByteArray(Charsets.US_ASCII))
+            dos.write(pt.pointId.padEnd(16).take(16).toByteArray(Charsets.US_ASCII))
+            dos.write(
+                pt.attribute
+                    .replace(Regex("[^\\x20-\\x7E]"), "")
+                    .padEnd(24)
+                    .take(24)
+                    .toByteArray(Charsets.US_ASCII)
+            )
             dos.write("%.3f".format(pt.easting ?: 0.0).padStart(12).substring(0, 12).toByteArray(Charsets.US_ASCII))
             dos.write("%.3f".format(pt.northing ?: 0.0).padStart(12).substring(0, 12).toByteArray(Charsets.US_ASCII))
             dos.write("%.3f".format(pt.altitude ?: 0.0).padStart(10).substring(0, 10).toByteArray(Charsets.US_ASCII))
