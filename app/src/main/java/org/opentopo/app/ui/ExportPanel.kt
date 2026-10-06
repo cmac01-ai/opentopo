@@ -60,6 +60,7 @@ import org.opentopo.app.export.CsvExporter
 import org.opentopo.app.export.CsvImporter
 import org.opentopo.app.export.DxfExporter
 import org.opentopo.app.export.GeoJsonExporter
+import org.opentopo.app.export.ShapefileExporter
 import org.opentopo.app.ui.theme.CoordinateFont
 import java.io.File
 
@@ -307,6 +308,36 @@ fun ExportPanel(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text("Export DXF")
+                        }
+
+                        /* -- Shapefile ZIP -- */
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    isExporting = true
+                                    exportStatus = null
+                                    val file = doExport(context, db, proj, "zip") { pts, out ->
+                                        ShapefileExporter.export(pts, proj, out)
+                                    }
+                                    isExporting = false
+                                    if (file != null) {
+                                        shareFile(context, file, "application/zip")
+                                        exportStatus = "Shapefile shared"
+                                    } else {
+                                        exportStatus = "No points"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.extraLarge,
+                        ) {
+                            Icon(
+                                Icons.Outlined.FileDownload,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Export Shapefile (.zip)")
                         }
                     }
                 }

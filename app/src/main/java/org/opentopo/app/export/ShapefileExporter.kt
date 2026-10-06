@@ -1,6 +1,9 @@
 package org.opentopo.app.export
 
 import org.opentopo.app.db.PointEntity
+import org.opentopo.app.db.ProjectEntity
+import org.opentopo.transform.SirgasUtmTransform
+import org.opentopo.transform.UtmHemisphere
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.OutputStream
@@ -11,16 +14,17 @@ import java.util.zip.ZipOutputStream
 
 /**
  * Exports survey points as a Shapefile (SHP/SHX/DBF) packed in a ZIP.
- * Uses EGSA87 projected coordinates (EPSG:2100).
+ * The PRJ is generated as SIRGAS2000 / UTM for the project zone/hemisphere.
  */
 object ShapefileExporter {
 
-    fun export(points: List<PointEntity>, projectName: String, output: OutputStream) {
+    fun export(points: List<PointEntity>, project: ProjectEntity, output: OutputStream) {
         val filtered = points.filter { it.layerType == "point" && it.easting != null && it.northing != null }
+        require(filtered.isNotEmpty()) { "No projected point available for Shapefile export" }
 
         val zip = ZipOutputStream(output)
 
-        val baseName = projectName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val baseName = project.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")
 
         // Write .shp
         zip.putNextEntry(ZipEntry("$baseName.shp"))
@@ -37,9 +41,9 @@ object ShapefileExporter {
         zip.write(buildDbf(filtered))
         zip.closeEntry()
 
-        // Write .prj (EGSA87 WKT)
+        // Write .prj (SIRGAS2000 / UTM WKT)
         zip.putNextEntry(ZipEntry("$baseName.prj"))
-        zip.write(EGSA87_WKT.toByteArray())
+        zip.write(sirgasUtmWkt(project, filtered).toByteArray())
         zip.closeEntry()
 
         zip.finish()
@@ -186,5 +190,25 @@ object ShapefileExporter {
 
     private data class DbfField(val name: String, val type: Char, val length: Int, val decimal: Int)
 
-    private const val EGSA87_WKT = """PROJCS["GGRS87 / Greek Grid",GEOGCS["GGRS87",DATUM["Greek_Geodetic_Reference_System_1987",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",24],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1],AUTHORITY["EPSG","2100"]]"""
+    private fun sirgasUtmWkt(project: ProjectEntity, points: List<PointEntity>): String {
+        val first = points.first()
+        val zone = project.utmZone
+            ?: first.utmZone
+            ?: SirgasUtmTransform.zoneFromLongitude(first.longitude)
+        val hemisphere = when (project.utmHemisphere) {
+            "NORTH" -> UtmHemisphere.NORTH
+            "SOUTH" -> UtmHemisphere.SOUTH
+            else -> when (first.utmHemisphere) {
+                "N" -> UtmHemisphere.NORTH
+                "S" -> UtmHemisphere.SOUTH
+                else -> if (first.latitude < 0.0) UtmHemisphere.SOUTH else UtmHemisphere.NORTH
+            }
+        }
+        val centralMeridian = SirgasUtmTransform.centralMeridianDeg(zone)
+        val falseNorthing = if (hemisphere == UtmHemisphere.SOUTH) 10_000_000 else 0
+        val epsg = SirgasUtmTransform.epsg(zone, hemisphere)
+        val authority = epsg?.let { ",AUTHORITY[\"EPSG\",\"$it\"]" } ?: ""
+
+        return """PROJCS["SIRGAS 2000 / UTM zone $zone${hemisphere.code}",GEOGCS["SIRGAS 2000",DATUM["Sistema_de_Referencia_Geocentrico_para_las_Americas_2000",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4674"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",$centralMeridian],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",$falseNorthing],UNIT["metre",1]$authority]"""
+    }
 }
