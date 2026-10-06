@@ -1178,30 +1178,14 @@ fun MainMapScreen(
                             )
                         }
                     }
-                    // 2. Layers — cycle through basemap layer combinations
+                    // 2. Basemap — Brazilian build currently uses OpenStreetMap.
                     Surface(
                         onClick = {
-                            val newOrtho: Boolean
-                            val newContours: Boolean
-                            when {
-                                !orthoVisible && !contoursVisible -> { newOrtho = false; newContours = true }
-                                !orthoVisible && contoursVisible -> { newOrtho = true; newContours = false }
-                                orthoVisible && !contoursVisible -> { newOrtho = true; newContours = true }
-                                else -> { newOrtho = false; newContours = false }
-                            }
-                            orthoVisible = newOrtho
-                            contoursVisible = newContours
-                            mapRef?.style?.getLayer("ktima-ortho-layer")?.setProperties(
-                                PropertyFactory.visibility(
-                                    if (newOrtho) org.maplibre.android.style.layers.Property.VISIBLE
-                                    else org.maplibre.android.style.layers.Property.NONE,
-                                ),
-                            )
-                            val contourVis = if (newContours)
-                                org.maplibre.android.style.layers.Property.VISIBLE
-                            else org.maplibre.android.style.layers.Property.NONE
-                            mapRef?.style?.getLayer("contours-lines")?.setProperties(PropertyFactory.visibility(contourVis))
-                            mapRef?.style?.getLayer("contours-labels")?.setProperties(PropertyFactory.visibility(contourVis))
+                            android.widget.Toast.makeText(
+                                context,
+                                "Mapa base: OpenStreetMap",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
                         },
                         shape = RoundedCornerShape(22.dp),
                         color = androidx.compose.ui.graphics.Color.Transparent,
@@ -1211,7 +1195,7 @@ fun MainMapScreen(
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 Icons.Outlined.Layers,
-                                contentDescription = "Cycle basemap",
+                                contentDescription = "OpenStreetMap",
                             )
                         }
                     }
