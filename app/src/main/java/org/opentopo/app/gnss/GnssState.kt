@@ -37,6 +37,7 @@ class GnssState : NmeaListener {
     private val gsvAccumulator = mutableMapOf<Constellation, MutableList<SatelliteInfo>>()
     private var gsvExpectedMessages = mutableMapOf<Constellation, Int>()
     private var gsvReceivedMessages = mutableMapOf<Constellation, Int>()
+    private val activePrnsByConstellation = mutableMapOf<Constellation, Set<Int>>()
 
     fun setConnectionStatus(status: ConnectionStatus) {
         _connectionStatus.value = status
@@ -82,6 +83,7 @@ class GnssState : NmeaListener {
             fixDescription = data.fixDescription,
             numSatellites = data.numSatellites,
             hdop = data.hdop,
+            ageOfDgpsSeconds = data.ageOfDgps,
             time = data.time,
             hasFix = data.quality > 0,
         )
@@ -114,12 +116,24 @@ class GnssState : NmeaListener {
     }
 
     override fun onGsa(data: GsaData) {
+        if (data.constellation != Constellation.UNKNOWN) {
+            activePrnsByConstellation[data.constellation] = data.satellitePrns.toSet()
+        }
+        val keys = activePrnsByConstellation.flatMap { (constellation, prns) ->
+            prns.map { prn -> SatelliteKey(constellation, prn) }
+        }.toSet()
+        val unionPrns = if (keys.isNotEmpty()) {
+            keys.map { it.prn }.distinct()
+        } else {
+            data.satellitePrns
+        }
         _accuracy.value = _accuracy.value.copy(
             fixType = data.fixType,
             pdop = data.pdop,
             hdop = data.hdop,
             vdop = data.vdop,
-            activeSatellitePrns = data.satellitePrns,
+            activeSatellitePrns = unionPrns,
+            activeSatelliteKeys = keys,
         )
     }
 
@@ -161,6 +175,7 @@ data class PositionState(
     val fixDescription: String = "No fix",
     val numSatellites: Int = 0,
     val hdop: Double? = null,
+    val ageOfDgpsSeconds: Double? = null,
     val time: String = "",
     val date: String = "",
     val speedKnots: Double? = null,
@@ -174,6 +189,7 @@ data class AccuracyState(
     val hdop: Double? = null,
     val vdop: Double? = null,
     val activeSatellitePrns: List<Int> = emptyList(),
+    val activeSatelliteKeys: Set<SatelliteKey> = emptySet(),
     val latitudeErrorM: Double? = null,
     val longitudeErrorM: Double? = null,
     val altitudeErrorM: Double? = null,
@@ -189,6 +205,11 @@ data class AccuracyState(
             return hdop?.times(2.5) // rough HDOP-to-accuracy approximation
         }
 }
+
+data class SatelliteKey(
+    val constellation: Constellation,
+    val prn: Int,
+)
 
 data class SatelliteState(
     val satellites: List<SatelliteInfo> = emptyList(),

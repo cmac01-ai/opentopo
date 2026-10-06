@@ -138,6 +138,7 @@ fun ConnectionPanel(
     val connectionStatus by gnssState.connectionStatus.collectAsState()
     val activeTransport by gnssState.activeTransport.collectAsState()
     val accuracy by gnssState.accuracy.collectAsState()
+    val position by gnssState.position.collectAsState()
     val satellites by gnssState.satellites.collectAsState()
     val ntripState by ntripClient.state.collectAsState()
     val connectedBtDevice by bluetoothService.connectedDevice.collectAsState()
@@ -232,7 +233,8 @@ fun ConnectionPanel(
                 elapsedSec = elapsedSec,
                 horizontalAccuracyM = accuracy.horizontalAccuracyM,
                 hdop = accuracy.hdop,
-                satsTracked = accuracy.activeSatellitePrns.size,
+                satsTracked = accuracy.activeSatelliteKeys.size.takeIf { it > 0 }
+                    ?: accuracy.activeSatellitePrns.size,
                 satsVisible = satellites.satellites.size,
                 onDisconnect = {
                     bluetoothService.disconnect()
@@ -257,6 +259,7 @@ fun ConnectionPanel(
             Spacer(Modifier.height(16.dp))
             ConstellationsCard(
                 satellites = satellites.satellites,
+                activeKeys = accuracy.activeSatelliteKeys,
                 activePrns = accuracy.activeSatellitePrns,
             )
             Spacer(Modifier.height(12.dp))
@@ -272,6 +275,7 @@ fun ConnectionPanel(
         NtripActiveProfileRow(
             profile = activeProfile,
             state = ntripConnectionState,
+            correctionAgeSeconds = position.ageOfDgpsSeconds,
             onClick = onNtripRowClick,
             onReconnectClick = onNtripReconnectClick,
         )
@@ -475,6 +479,7 @@ private val CONSTELLATION_CELLS = listOf(
 @Composable
 private fun ConstellationsCard(
     satellites: List<SatelliteInfo>,
+    activeKeys: Set<org.opentopo.app.gnss.SatelliteKey>,
     activePrns: List<Int>,
 ) {
     val byConst = satellites.groupBy { it.constellation }
@@ -508,7 +513,13 @@ private fun ConstellationsCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CONSTELLATION_CELLS.forEach { cell ->
                     val sats = byConst[cell.constellation].orEmpty()
-                    val tracked = sats.count { it.prn in activePrnSet }
+                    val tracked = if (activeKeys.isNotEmpty()) {
+                        sats.count { sat ->
+                            org.opentopo.app.gnss.SatelliteKey(cell.constellation, sat.prn) in activeKeys
+                        }
+                    } else {
+                        sats.count { it.prn in activePrnSet }
+                    }
                     ConstellationCell(
                         name = cell.name,
                         color = cell.color,

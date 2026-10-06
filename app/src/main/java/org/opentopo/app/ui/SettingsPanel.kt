@@ -348,6 +348,9 @@ fun SettingsPanel(
                 HorizontalDivider()
                 ListItem(
                     headlineContent = { Text("Intervalo GGA para NTRIP") },
+                    supportingContent = {
+                        Text("Envio da posição ao caster VRS; não é a taxa de recebimento RTCM")
+                    },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -356,7 +359,7 @@ fun SettingsPanel(
                                 Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
                             }
                             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                listOf(5, 10, 15, 30, 60).forEach { secs ->
+                                listOf(1, 2, 5, 10, 15, 30, 60).forEach { secs ->
                                     DropdownMenuItem(
                                         text = { Text("${secs}s") },
                                         onClick = {

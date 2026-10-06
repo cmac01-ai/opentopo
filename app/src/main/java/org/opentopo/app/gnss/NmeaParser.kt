@@ -76,7 +76,7 @@ class NmeaParser(private val listener: NmeaListener) {
         when (type) {
             "GGA" -> { parseGga(fields); listener.onRawGga(sentence) }
             "RMC" -> parseRmc(fields)
-            "GSA" -> parseGsa(fields)
+            "GSA" -> parseGsa(fields, sentenceId.take(2))
             "GSV" -> parseGsv(fields)
             "GST" -> parseGst(fields)
         }
@@ -118,16 +118,32 @@ class NmeaParser(private val listener: NmeaListener) {
 
     // ── GSA: DOP and Active Satellites ──
 
-    private fun parseGsa(fields: List<String>) {
+    private fun parseGsa(fields: List<String>, talker: String) {
         if (fields.size < 18) return
         val prns = (3..14).mapNotNull { fields.getOrNull(it)?.toIntOrNull() }
+        val systemId = fields.getOrNull(18)?.toIntOrNull()
+        val constellation = when (talker) {
+            "GP" -> Constellation.GPS
+            "GL" -> Constellation.GLONASS
+            "GA" -> Constellation.GALILEO
+            "GB", "BD" -> Constellation.BEIDOU
+            "GN" -> when (systemId) {
+                1 -> Constellation.GPS
+                2 -> Constellation.GLONASS
+                3 -> Constellation.GALILEO
+                4 -> Constellation.BEIDOU
+                else -> Constellation.UNKNOWN
+            }
+            else -> Constellation.UNKNOWN
+        }
         val gsa = GsaData(
             mode = fields[1].firstOrNull() ?: 'A',
             fixType = fields[2].toIntOrNull() ?: 1,
             satellitePrns = prns,
             pdop = fields[15].toDoubleOrNull(),
             hdop = fields[16].toDoubleOrNull(),
-            vdop = fields[17].substringBefore('*').toDoubleOrNull(),
+            vdop = fields[17].toDoubleOrNull(),
+            constellation = constellation,
         )
         listener.onGsa(gsa)
     }
@@ -269,6 +285,7 @@ data class GsaData(
     val pdop: Double?,
     val hdop: Double?,
     val vdop: Double?,
+    val constellation: Constellation = Constellation.UNKNOWN,
 )
 
 data class GsvData(

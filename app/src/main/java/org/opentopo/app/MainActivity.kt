@@ -21,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.StateFlow
 import org.opentopo.app.db.AppDatabase
 import org.opentopo.app.gnss.BluetoothGnssService
 import org.opentopo.app.gnss.GnssState
+import org.opentopo.app.gnss.GnssKeepAliveService
 import org.opentopo.app.gnss.InternalGnssService
 import org.opentopo.app.gnss.UsbGnssService
 import org.opentopo.app.ntrip.NtripClient
@@ -178,6 +180,31 @@ class MainActivity : ComponentActivity() {
         requestPermissionsIfNeeded()
         registerUsbReceiver()
 
+        lifecycleScope.launch {
+            combine(
+                gnssState.activeTransport,
+                gnssState.connectionStatus,
+            ) { transport, status -> transport to status }
+                .collect { (transport, status) ->
+                    val externalSession =
+                        (transport == org.opentopo.app.gnss.Transport.BLUETOOTH ||
+                            transport == org.opentopo.app.gnss.Transport.USB) &&
+                            status != org.opentopo.app.gnss.ConnectionStatus.DISCONNECTED
+                    if (externalSession) {
+                        try {
+                            ContextCompat.startForegroundService(
+                                this@MainActivity,
+                                Intent(this@MainActivity, GnssKeepAliveService::class.java),
+                            )
+                        } catch (_: SecurityException) {
+                            // Permission may still be pending on first launch.
+                        }
+                    } else {
+                        stopService(Intent(this@MainActivity, GnssKeepAliveService::class.java))
+                    }
+                }
+        }
+
         setContent {
             val gloveMode by prefs.gloveMode.collectAsState(initial = false)
             OpenTopoTheme(gloveMode = gloveMode) {
@@ -253,6 +280,7 @@ class MainActivity : ComponentActivity() {
         bluetoothService.disconnect()
         usbService.destroy()
         internalService.disconnect()
+        stopService(Intent(this, GnssKeepAliveService::class.java))
         try {
             unregisterReceiver(usbReceiver)
         } catch (_: IllegalArgumentException) {
@@ -333,6 +361,10 @@ class MainActivity : ComponentActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED
         ) needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) needed.add(Manifest.permission.POST_NOTIFICATIONS)
         if (needed.isNotEmpty()) {
             permissionLauncher.launch(needed.toTypedArray())
         }

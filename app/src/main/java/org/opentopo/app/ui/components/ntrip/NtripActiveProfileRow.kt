@@ -66,6 +66,7 @@ import org.opentopo.app.ui.theme.CoordinateFont
 fun NtripActiveProfileRow(
     profile: NtripProfile?,
     state: NtripConnectionState,
+    correctionAgeSeconds: Double? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onReconnectClick: (() -> Unit)? = null,
@@ -118,7 +119,7 @@ fun NtripActiveProfileRow(
                 .defaultMinSize(minWidth = 1.dp),
         ) {
             if (!isEmpty) {
-                StatusStrip(state = state)
+                StatusStrip(state = state, correctionAgeSeconds = correctionAgeSeconds)
                 Spacer(Modifier.height(2.dp))
             }
             Text(
@@ -207,7 +208,10 @@ private fun resolveBadgeColors(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun StatusStrip(state: NtripConnectionState) {
+private fun StatusStrip(
+    state: NtripConnectionState,
+    correctionAgeSeconds: Double?,
+) {
     val overline = overlineFor(state) ?: return
     val overlineStyle = TextStyle(
         fontSize = 10.sp,
@@ -226,7 +230,7 @@ private fun StatusStrip(state: NtripConnectionState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         StatusDot(state = state)
-        StatusDetail(state = state)
+        StatusDetail(state = state, correctionAgeSeconds = correctionAgeSeconds)
     }
 }
 
@@ -308,7 +312,10 @@ private fun PulsingLiveDot(color: Color) {
 }
 
 @Composable
-private fun StatusDetail(state: NtripConnectionState) {
+private fun StatusDetail(
+    state: NtripConnectionState,
+    correctionAgeSeconds: Double?,
+) {
     val detailStyle = TextStyle(
         fontFamily = CoordinateFont,
         fontSize = 10.sp,
@@ -317,12 +324,12 @@ private fun StatusDetail(state: NtripConnectionState) {
     )
     when (state) {
         is NtripConnectionState.Live -> Text(
-            text = "live \u00B7 %.1f s".format(state.ageSeconds),
+            text = "Age %.1f s".format(correctionAgeSeconds ?: state.ageSeconds),
             style = detailStyle,
             color = Color(0xFF00493D),
         )
         is NtripConnectionState.Stale -> Text(
-            text = "age %.0f s".format(state.ageSeconds),
+            text = "Age %.1f s".format(correctionAgeSeconds ?: state.ageSeconds),
             style = detailStyle,
             color = Color(0xFF9B3A2E),
         )
