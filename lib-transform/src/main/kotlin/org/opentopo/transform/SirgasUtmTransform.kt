@@ -50,6 +50,7 @@ object SirgasUtmTransform {
     fun forward(
         coordinate: GeographicCoordinate,
         zoneOverride: Int? = null,
+        hemisphereOverride: UtmHemisphere? = null,
     ): SirgasUtmCoordinate {
         require(coordinate.latitudeDeg in -80.0..84.0) {
             "UTM is defined between 80°S and 84°N"
@@ -58,7 +59,7 @@ object SirgasUtmTransform {
         val zone = zoneOverride ?: zoneFromLongitude(coordinate.longitudeDeg)
         require(zone in 1..60) { "UTM zone must be between 1 and 60" }
 
-        val hemisphere = if (coordinate.latitudeDeg < 0.0) {
+        val hemisphere = hemisphereOverride ?: if (coordinate.latitudeDeg < 0.0) {
             UtmHemisphere.SOUTH
         } else {
             UtmHemisphere.NORTH

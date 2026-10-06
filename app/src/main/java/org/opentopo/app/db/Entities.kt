@@ -16,6 +16,8 @@ data class ProjectEntity(
     val coordinateSystem: String = "SIRGAS2000_UTM",
     /** Null means automatic UTM zone derived from longitude. */
     val utmZone: Int? = null,
+    /** AUTO, NORTH or SOUTH. Null from older projects is treated as AUTO. */
+    val utmHemisphere: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 )
@@ -54,5 +56,9 @@ data class PointEntity(
     @ColumnInfo(name = "featureId") val featureId: Long? = null, // groups vertices into lines/polygons
     @ColumnInfo(name = "geoidSeparation") val geoidSeparation: Double? = null,
     @ColumnInfo(name = "orthometricHeight") val orthometricHeight: Double? = null,
+    /** CRS metadata captured when this point was recorded. */
+    val crsEpsg: Int? = null,
+    val utmZone: Int? = null,
+    val utmHemisphere: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
 )

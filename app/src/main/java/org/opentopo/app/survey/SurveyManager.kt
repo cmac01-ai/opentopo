@@ -87,7 +87,11 @@ class SurveyManager(
         scope.launch(Dispatchers.IO) {
             val project = id?.let { db.projectDao().getById(it) }
             if (project != null) {
-                coordinateSystem.setConfig(project.coordinateSystem, project.utmZone)
+                coordinateSystem.setConfig(
+                    project.coordinateSystem,
+                    project.utmZone,
+                    project.utmHemisphere,
+                )
             }
         }
     }
@@ -203,11 +207,12 @@ class SurveyManager(
             val acc = gnssState.accuracy.value
             if (!pos.hasFix) return@launch
 
-            val projected = try {
+            val projectedResult = try {
                 coordinateSystem.project(
                     GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0)
-                ).coordinate
+                )
             } catch (_: Exception) { null }
+            val projected = projectedResult?.coordinate
 
             val vertexNum = _vertexCount.value + 1
             val pointId = if (mode == "line") "L${featureId}-V${vertexNum}" else "PG${featureId}-V${vertexNum}"
@@ -232,6 +237,9 @@ class SurveyManager(
                 featureId = featureId,
                 geoidSeparation = gnssState.position.value.geoidSeparation,
                 orthometricHeight = pos.altitude, // GGA altitude = MSL
+                crsEpsg = projectedResult?.epsg,
+                utmZone = projectedResult?.utmZone,
+                utmHemisphere = projectedResult?.utmHemisphere?.code?.toString(),
             )
             db.pointDao().insert(point)
             _vertexCount.value = vertexNum
@@ -316,9 +324,10 @@ class SurveyManager(
         val avgSats = epochs.map { it.numSatellites }.average().toInt()
         val avgHdop = epochs.mapNotNull { it.hdop }.takeIf { it.isNotEmpty() }?.average()
 
-        val projected = coordinateSystem.project(
+        val projectedResult = coordinateSystem.project(
             GeographicCoordinate(avgLat, avgLon, avgAlt ?: 0.0)
-        ).coordinate
+        )
+        val projected = projectedResult.coordinate
 
         val count = db.pointDao().countByProject(projectId)
         val pointId = "P%03d".format(count + 1)
@@ -341,6 +350,9 @@ class SurveyManager(
             remarks = remarks,
             geoidSeparation = avgGeoidSep,
             orthometricHeight = orthoHeight,
+            crsEpsg = projectedResult.epsg,
+            utmZone = projectedResult.utmZone,
+            utmHemisphere = projectedResult.utmHemisphere?.code?.toString(),
         )
 
         val id = db.pointDao().insert(point)

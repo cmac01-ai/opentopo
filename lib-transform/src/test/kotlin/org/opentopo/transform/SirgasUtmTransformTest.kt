@@ -57,6 +57,31 @@ class SirgasUtmTransformTest {
     }
 
     @Test
+    fun `northern Brazil uses SIRGAS2000 UTM north EPSG`() {
+        val result = SirgasUtmTransform.forward(
+            GeographicCoordinate(latitudeDeg = 2.82384, longitudeDeg = -60.6753),
+        )
+
+        assertEquals(20, result.zone)
+        assertEquals(UtmHemisphere.NORTH, result.hemisphere)
+        assertEquals(31974, result.epsg)
+        assertTrue(abs(result.eastingM - 758439.945186) < 0.01)
+        assertTrue(abs(result.northingM - 312380.104466) < 0.01)
+    }
+
+    @Test
+    fun `hemisphere can be forced by project configuration`() {
+        val result = SirgasUtmTransform.forward(
+            GeographicCoordinate(latitudeDeg = -0.10, longitudeDeg = -51.0),
+            zoneOverride = 22,
+            hemisphereOverride = UtmHemisphere.NORTH,
+        )
+
+        assertEquals(UtmHemisphere.NORTH, result.hemisphere)
+        assertEquals(31976, result.epsg)
+    }
+
+    @Test
     fun `zone can be forced for projects near a UTM boundary`() {
         val automatic = SirgasUtmTransform.forward(
             GeographicCoordinate(latitudeDeg = -20.0, longitudeDeg = -41.99),

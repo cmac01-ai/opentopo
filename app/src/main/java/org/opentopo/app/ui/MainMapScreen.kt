@@ -1987,6 +1987,7 @@ private fun NewProjectHeaderDialog(
     var description by remember { mutableStateOf("") }
     var coordinateSystem by remember { mutableStateOf("SIRGAS2000_UTM") }
     var utmZone by remember { mutableStateOf<Int?>(null) }
+    var utmHemisphere by remember { mutableStateOf("AUTO") }
     val scope = rememberCoroutineScope()
 
     androidx.compose.material3.AlertDialog(
@@ -2042,6 +2043,7 @@ private fun NewProjectHeaderDialog(
                             onClick = {
                                 coordinateSystem = "EGSA87"
                                 utmZone = null
+                                utmHemisphere = "AUTO"
                                 crsExpanded = false
                             },
                         )
@@ -2049,25 +2051,68 @@ private fun NewProjectHeaderDialog(
                 }
 
                 if (coordinateSystem == "SIRGAS2000_UTM") {
+                    var hemisphereExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { hemisphereExpanded = true }) {
+                            Text(
+                                when (utmHemisphere) {
+                                    "NORTH" -> "Hemisfério: Norte"
+                                    "SOUTH" -> "Hemisfério: Sul"
+                                    else -> "Hemisfério: Automático"
+                                }
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = hemisphereExpanded,
+                            onDismissRequest = { hemisphereExpanded = false },
+                        ) {
+                            listOf(
+                                "AUTO" to "Automático pela latitude",
+                                "NORTH" to "Norte",
+                                "SOUTH" to "Sul",
+                            ).forEach { (value, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        utmHemisphere = value
+                                        if (value == "NORTH" && (utmZone ?: 18) > 22) {
+                                            utmZone = null
+                                        }
+                                        hemisphereExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
                     var zoneExpanded by remember { mutableStateOf(false) }
+                    val zoneSuffix = when (utmHemisphere) {
+                        "NORTH" -> "N"
+                        "SOUTH" -> "S"
+                        else -> ""
+                    }
                     Box {
                         TextButton(onClick = { zoneExpanded = true }) {
-                            Text(utmZone?.let { "UTM ${it}S" } ?: "UTM zone: automatic")
+                            Text(
+                                utmZone?.let { "UTM ${it}$zoneSuffix" }
+                                    ?: "Fuso UTM: automático"
+                            )
                         }
                         DropdownMenu(
                             expanded = zoneExpanded,
                             onDismissRequest = { zoneExpanded = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Automatic from longitude") },
+                                text = { Text("Automático pela longitude") },
                                 onClick = {
                                     utmZone = null
                                     zoneExpanded = false
                                 },
                             )
-                            (18..25).forEach { zone ->
+                            val zones = if (utmHemisphere == "NORTH") 18..22 else 18..25
+                            zones.forEach { zone ->
                                 DropdownMenuItem(
-                                    text = { Text("UTM ${zone}S") },
+                                    text = { Text("UTM ${zone}$zoneSuffix") },
                                     onClick = {
                                         utmZone = zone
                                         zoneExpanded = false
@@ -2089,6 +2134,7 @@ private fun NewProjectHeaderDialog(
                                 description = description,
                                 coordinateSystem = coordinateSystem,
                                 utmZone = utmZone,
+                                utmHemisphere = utmHemisphere,
                             )
                             val id = db.projectDao().insert(project)
                             surveyManager?.setActiveProject(id)
