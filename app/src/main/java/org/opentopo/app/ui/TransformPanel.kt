@@ -15,6 +15,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,14 +27,31 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import org.opentopo.app.db.PointEntity
 import org.opentopo.app.ui.theme.CoordinateFont
 import org.opentopo.transform.GeographicCoordinate
 import org.opentopo.transform.SirgasUtmCoordinate
 import org.opentopo.transform.SirgasUtmTransform
 import org.opentopo.transform.UtmHemisphere
 
+data class TransformStakeTarget(
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val altitude: Double?,
+    val easting: Double,
+    val northing: Double,
+    val zone: Int,
+    val hemisphere: UtmHemisphere,
+    val epsg: Int?,
+)
+
 @Composable
-fun TransformPanel(modifier: Modifier = Modifier) {
+fun TransformPanel(
+    projectPoints: List<PointEntity> = emptyList(),
+    onSaveStakeTarget: ((TransformStakeTarget) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
     var latInput by remember { mutableStateOf("") }
     var lonInput by remember { mutableStateOf("") }
     var heightInput by remember { mutableStateOf("0.0") }
@@ -49,6 +67,48 @@ fun TransformPanel(modifier: Modifier = Modifier) {
     var inverseResult by remember { mutableStateOf<GeographicCoordinate?>(null) }
     var inverseError by remember { mutableStateOf<String?>(null) }
 
+    val surveyedPoints = projectPoints.filter {
+        it.layerType == "point" && it.easting != null && it.northing != null
+    }
+    val stakeTargetCount = projectPoints.count { it.layerType == "stake_target" }
+    val suggestedTargetName = "LOC%03d".format(stakeTargetCount + 1)
+    var targetName by remember(stakeTargetCount) { mutableStateOf(suggestedTargetName) }
+    var pointMenuExpanded by remember { mutableStateOf(false) }
+
+    fun loadSurveyPoint(point: PointEntity) {
+        val hemisphere = when (point.utmHemisphere?.uppercase()) {
+            "N", "NORTH" -> UtmHemisphere.NORTH
+            "S", "SOUTH" -> UtmHemisphere.SOUTH
+            else -> if (point.latitude < 0.0) UtmHemisphere.SOUTH else UtmHemisphere.NORTH
+        }
+        val zone = point.utmZone ?: SirgasUtmTransform.zoneFromLongitude(point.longitude)
+        val geographic = GeographicCoordinate(
+            latitudeDeg = point.latitude,
+            longitudeDeg = point.longitude,
+            heightM = point.altitude ?: 0.0,
+        )
+        val projected = SirgasUtmTransform.forward(
+            coordinate = geographic,
+            zoneOverride = zone,
+            hemisphereOverride = hemisphere,
+        )
+
+        latInput = "%.10f".format(point.latitude)
+        lonInput = "%.10f".format(point.longitude)
+        heightInput = point.altitude?.let { "%.3f".format(it) } ?: "0.0"
+        zoneOverride = zone
+        hemisphereMode = if (hemisphere == UtmHemisphere.NORTH) "NORTH" else "SOUTH"
+        forwardResult = projected
+        forwardError = null
+
+        eastingInput = "%.3f".format(projected.eastingM)
+        northingInput = "%.3f".format(projected.northingM)
+        inverseZone = zone
+        inverseHemisphere = hemisphere
+        inverseResult = geographic
+        inverseError = null
+    }
+
     Column(
         modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -59,6 +119,89 @@ fun TransformPanel(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(20.dp),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Projeto", style = MaterialTheme.typography.titleSmall)
+
+                if (surveyedPoints.isNotEmpty()) {
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { pointMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Ler ponto levantado (${surveyedPoints.size})")
+                        }
+                        DropdownMenu(
+                            expanded = pointMenuExpanded,
+                            onDismissRequest = { pointMenuExpanded = false },
+                            modifier = Modifier.fillMaxWidth(0.92f),
+                        ) {
+                            surveyedPoints.forEach { point ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(point.pointId)
+                                            Text(
+                                                buildString {
+                                                    point.attribute.takeIf { it.isNotBlank() }?.let {
+                                                        append(it).append(" · ")
+                                                    }
+                                                    append(
+                                                        "E ${"%.3f".format(point.easting)} · " +
+                                                            "N ${"%.3f".format(point.northing)}"
+                                                    )
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        loadSurveyPoint(point)
+                                        pointMenuExpanded = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "Selecionar um ponto preenche os dois sentidos da conversão.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "Nenhum ponto levantado disponível no projeto ativo.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                OutlinedTextField(
+                    value = targetName,
+                    onValueChange = { targetName = it.uppercase() },
+                    label = { Text("Nome ao salvar para locação") },
+                    supportingText = {
+                        Text(
+                            if (onSaveStakeTarget != null)
+                                "O alvo ficará disponível diretamente na tela Stake."
+                            else
+                                "Selecione ou crie um projeto para salvar alvos."
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = CoordinateFont),
+                )
+            }
+        }
 
         Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -171,6 +314,31 @@ fun TransformPanel(modifier: Modifier = Modifier) {
                             )
                             Text("E  ${"%.3f".format(result.eastingM)} m", fontFamily = CoordinateFont)
                             Text("N  ${"%.3f".format(result.northingM)} m", fontFamily = CoordinateFont)
+                            FilledTonalButton(
+                                onClick = {
+                                    val lat = latInput.replace(',', '.').toDoubleOrNull()
+                                    val lon = lonInput.replace(',', '.').toDoubleOrNull()
+                                    if (lat != null && lon != null) {
+                                        onSaveStakeTarget?.invoke(
+                                            TransformStakeTarget(
+                                                name = targetName.trim().ifBlank { suggestedTargetName },
+                                                latitude = lat,
+                                                longitude = lon,
+                                                altitude = heightInput.replace(',', '.').toDoubleOrNull(),
+                                                easting = result.eastingM,
+                                                northing = result.northingM,
+                                                zone = result.zone,
+                                                hemisphere = result.hemisphere,
+                                                epsg = result.epsg,
+                                            )
+                                        )
+                                    }
+                                },
+                                enabled = onSaveStakeTarget != null,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Salvar resultado para locação")
+                            }
                         }
                     }
                 }
@@ -263,6 +431,34 @@ fun TransformPanel(modifier: Modifier = Modifier) {
                             Text("SIRGAS2000", style = MaterialTheme.typography.labelLarge)
                             Text("Lat  ${"%.9f".format(result.latitudeDeg)}°", fontFamily = CoordinateFont)
                             Text("Lon  ${"%.9f".format(result.longitudeDeg)}°", fontFamily = CoordinateFont)
+                            FilledTonalButton(
+                                onClick = {
+                                    val e = eastingInput.replace(',', '.').toDoubleOrNull()
+                                    val n = northingInput.replace(',', '.').toDoubleOrNull()
+                                    if (e != null && n != null) {
+                                        onSaveStakeTarget?.invoke(
+                                            TransformStakeTarget(
+                                                name = targetName.trim().ifBlank { suggestedTargetName },
+                                                latitude = result.latitudeDeg,
+                                                longitude = result.longitudeDeg,
+                                                altitude = null,
+                                                easting = e,
+                                                northing = n,
+                                                zone = inverseZone,
+                                                hemisphere = inverseHemisphere,
+                                                epsg = SirgasUtmTransform.epsg(
+                                                    inverseZone,
+                                                    inverseHemisphere,
+                                                ),
+                                            )
+                                        )
+                                    }
+                                },
+                                enabled = onSaveStakeTarget != null,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Salvar resultado para locação")
+                            }
                         }
                     }
                 }

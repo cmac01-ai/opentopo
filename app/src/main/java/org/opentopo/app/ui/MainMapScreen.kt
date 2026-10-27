@@ -1727,7 +1727,56 @@ fun MainMapScreen(
                         )
                     }
                 }
-                TransformPanel()
+                TransformPanel(
+                    projectPoints = activePoints,
+                    onSaveStakeTarget = if (activeProjectId != null) {
+                        { target ->
+                            scope.launch {
+                                val projectId = activeProjectId ?: return@launch
+                                db.pointDao().insert(
+                                    org.opentopo.app.db.PointEntity(
+                                        projectId = projectId,
+                                        pointId = target.name,
+                                        latitude = target.latitude,
+                                        longitude = target.longitude,
+                                        altitude = target.altitude,
+                                        easting = target.easting,
+                                        northing = target.northing,
+                                        horizontalAccuracy = null,
+                                        verticalAccuracy = null,
+                                        fixQuality = 0,
+                                        numSatellites = 0,
+                                        hdop = null,
+                                        averagingSeconds = 0,
+                                        antennaHeight = null,
+                                        attribute = "ALVO_LOCAÇÃO",
+                                        remarks = "Criado pelo conversor de coordenadas",
+                                        layerType = "stake_target",
+                                        crsEpsg = target.epsg,
+                                        utmZone = target.zone,
+                                        utmHemisphere = target.hemisphere.code.toString(),
+                                    )
+                                )
+                                stakeout?.setTarget(
+                                    org.opentopo.app.survey.StakeoutTarget(
+                                        name = target.name,
+                                        easting = target.easting,
+                                        northing = target.northing,
+                                        elevation = target.altitude,
+                                    )
+                                )
+                                transformScreenOpen = false
+                                moreScreenOpen = false
+                                sheetMode = SheetMode.STAKEOUT
+                                snackbarHostState.showSnackbar(
+                                    "Alvo ${target.name} salvo no projeto e aberto no Stake."
+                                )
+                            }
+                        }
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }

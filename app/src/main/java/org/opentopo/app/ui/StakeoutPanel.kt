@@ -690,7 +690,9 @@ private fun StakeoutTargetForm(
         Spacer(Modifier.height(8.dp))
 
         val stakeablePoints = projectPoints.filter {
-            it.layerType == "point" && it.easting != null && it.northing != null
+            (it.layerType == "point" || it.layerType == "stake_target") &&
+                it.easting != null &&
+                it.northing != null
         }
         if (stakeablePoints.isNotEmpty()) {
             var pointMenuExpanded by remember { mutableStateOf(false) }
@@ -700,7 +702,7 @@ private fun StakeoutTargetForm(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.extraLarge,
                 ) {
-                    Text("Selecionar ponto do projeto (${stakeablePoints.size})")
+                    Text("Selecionar ponto/alvo do projeto (${stakeablePoints.size})")
                 }
                 DropdownMenu(
                     expanded = pointMenuExpanded,
@@ -711,9 +713,22 @@ private fun StakeoutTargetForm(
                         DropdownMenuItem(
                             text = {
                                 Column {
-                                    Text(point.pointId)
                                     Text(
-                                        "E ${"%.3f".format(point.easting)} · N ${"%.3f".format(point.northing)}",
+                                        if (point.layerType == "stake_target")
+                                            "ALVO · ${point.pointId}"
+                                        else
+                                            point.pointId
+                                    )
+                                    Text(
+                                        buildString {
+                                            if (point.attribute.isNotBlank()) {
+                                                append(point.attribute).append(" · ")
+                                            }
+                                            append(
+                                                "E ${"%.3f".format(point.easting)} · " +
+                                                    "N ${"%.3f".format(point.northing)}"
+                                            )
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
