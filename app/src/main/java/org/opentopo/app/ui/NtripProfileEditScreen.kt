@@ -77,7 +77,7 @@ import java.util.UUID
 @Composable
 fun NtripProfileEditScreen(
     initial: NtripProfile?,
-    onScanSourcetable: suspend (host: String, port: Int, user: String, pass: String) -> Result<List<NtripMountpoint>>,
+    onScanSourcetable: suspend (host: String, port: Int, user: String, pass: String, useTls: Boolean) -> Result<List<NtripMountpoint>>,
     onSave: (NtripProfile) -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
@@ -352,7 +352,7 @@ fun NtripProfileEditScreen(
                             scope.launch {
                                 scanning = true
                                 scanError = null
-                                val result = onScanSourcetable(host.trim(), p, username, password)
+                                val result = onScanSourcetable(host.trim(), p, username, password, useTls)
                                 scanning = false
                                 result.fold(
                                     onSuccess = {

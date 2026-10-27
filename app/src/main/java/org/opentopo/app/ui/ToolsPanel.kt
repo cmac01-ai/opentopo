@@ -29,10 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -45,7 +41,6 @@ import androidx.compose.ui.unit.sp
 import org.opentopo.app.db.AppDatabase
 import org.opentopo.app.survey.SurveyManager
 import org.opentopo.app.ui.theme.CoordinateFont
-import org.opentopo.transform.HeposTransform
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -53,32 +48,26 @@ import org.opentopo.transform.HeposTransform
 fun ToolsPanel(
     db: AppDatabase,
     surveyManager: SurveyManager?,
-    transform: HeposTransform?,
     modifier: Modifier = Modifier,
     onOpenCoordConverter: () -> Unit = {},
-    onOpenGysSearch: () -> Unit = {},
+    onOpenRbmc: () -> Unit = {},
     onOpenImport: () -> Unit = {},
     onOpenExportProject: () -> Unit = {},
     onOpenAreaPerimeter: () -> Unit = {},
-    onOpenTransformPipeline: () -> Unit = {},
-    onOpenSettings: () -> Unit = {},
     onOpenRecentActivity: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     onOpenWhatsNew: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
 ) {
-    @Suppress("UNUSED_VARIABLE")
-    var query by remember { mutableStateOf("") }
-
     Column(
         modifier = modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
     ) {
-        // ── 1. Page header (margin-top 20 dp) ──
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "TOOLS \u00B7 SETTINGS \u00B7 ABOUT",
+            text = "BRASIL · SIRGAS2000 · RTK",
             fontFamily = CoordinateFont,
             fontSize = 11.sp,
             letterSpacing = 0.06.em,
@@ -86,7 +75,7 @@ fun ToolsPanel(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "More",
+            text = "Mais",
             fontSize = 30.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = (-0.02).em,
@@ -94,7 +83,6 @@ fun ToolsPanel(
             color = MaterialTheme.colorScheme.onSurface,
         )
 
-        // ── 2. Search bar (margin-top 14 dp) ──
         Spacer(Modifier.height(14.dp))
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -115,21 +103,20 @@ fun ToolsPanel(
                     modifier = Modifier.size(24.dp),
                 )
                 Text(
-                    text = "Search tools & settings",
+                    text = "Ferramentas de campo",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
 
-        // ── 3. Tools section (margin-top 18 dp) ──
         Spacer(Modifier.height(18.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "TOOLS",
+                text = "FERRAMENTAS",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.1.em,
@@ -146,18 +133,18 @@ fun ToolsPanel(
         Spacer(Modifier.height(10.dp))
 
         val tiles = listOf(
-            ToolTile("CC", "Coord. converter", "EGSA87 \u2194 WGS84 \u2194 UTM",
+            ToolTile("CC", "Conversor", "SIRGAS2000 ↔ UTM",
                 Color(0xFFA5F2D9), Color(0xFF00493D), onOpenCoordConverter),
-            ToolTile("GY", "GYS search", "25,259 trig points",
-                Color(0xFFD6E3FF), Color(0xFF002F66), onOpenGysSearch),
-            ToolTile("IM", "Import", "CSV \u00B7 DXF \u00B7 GeoJSON",
+            ToolTile("IP", "RBMC-IP · IBGE", "NTRIP · porta 2101",
+                Color(0xFFD6E3FF), Color(0xFF002F66), onOpenRbmc),
+            ToolTile("IM", "Importar", "CSV de pontos",
                 Color(0xFFFFDBC9), Color(0xFF3A1100), onOpenImport),
-            ToolTile("EX", "Export project", "LandXML \u00B7 SHP \u00B7 PDF",
+            ToolTile("EX", "Exportar projeto", "CSV · GeoJSON · DXF",
                 Color(0xFFFDF0B3), Color(0xFF4A3F00), onOpenExportProject),
-            ToolTile("AR", "Area & perimeter", "from current polygon",
+            ToolTile("AR", "Área e perímetro", "polígono atual",
                 Color(0xFFDCE5E0), Color(0xFF1F2E2A), onOpenAreaPerimeter),
-            ToolTile("TR", "Transform pipeline", "HEPOS \u00B7 custom 7-param",
-                Color(0xFFFFD9D2), Color(0xFF6C1C10), onOpenTransformPipeline),
+            ToolTile("PT", "Pontos do projeto", "levantamento recente",
+                Color(0xFFFFD9D2), Color(0xFF6C1C10), onOpenRecentActivity),
         )
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -172,10 +159,9 @@ fun ToolsPanel(
             }
         }
 
-        // ── 4. App list (margin-top 18 dp) ──
         Spacer(Modifier.height(18.dp))
         Text(
-            text = "APP",
+            text = "APLICATIVO",
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.1.em,
@@ -189,46 +175,16 @@ fun ToolsPanel(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column {
-                AppListRow(
-                    icon = Icons.Outlined.Settings,
-                    title = "Settings",
-                    sub = "Units, coordinates, display, storage",
-                    onClick = onOpenSettings,
-                )
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    thickness = 1.dp,
-                )
-                AppListRow(
-                    icon = Icons.Outlined.Schedule,
-                    title = "Recent activity",
-                    sub = "Last 30 days \u00B7 142 points recorded",
-                    onClick = onOpenRecentActivity,
-                )
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    thickness = 1.dp,
-                )
-                AppListRow(
-                    icon = Icons.Outlined.StarOutline,
-                    title = "What's new in v2.0",
-                    sub = "M3 Expressive \u00B7 NTRIP profiles \u00B7 AMOLED",
-                    onClick = onOpenWhatsNew,
-                )
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    thickness = 1.dp,
-                )
-                AppListRow(
-                    icon = Icons.Outlined.Info,
-                    title = "About OpenTopo",
-                    sub = "v2.0.0 \u00B7 AGPLv3 \u00B7 opentopo.gr",
-                    onClick = onOpenAbout,
-                )
+                AppListRow(Icons.Outlined.Settings, "Configurações", "Coordenadas, levantamento, exibição", onOpenSettings)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                AppListRow(Icons.Outlined.Schedule, "Atividade recente", "Pontos e feições do projeto", onOpenRecentActivity)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                AppListRow(Icons.Outlined.StarOutline, "Novidades", "Adaptação brasileira do OpenTopo", onOpenWhatsNew)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                AppListRow(Icons.Outlined.Info, "Sobre", "OpenTopo · fork Brasil · AGPLv3", onOpenAbout)
             }
         }
 
-        // ── 5. Trailing spacer ──
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -243,71 +199,37 @@ private data class ToolTile(
 )
 
 @Composable
-private fun ToolTileView(
-    tile: ToolTile,
-    modifier: Modifier = Modifier,
-) {
+private fun ToolTileView(tile: ToolTile, modifier: Modifier = Modifier) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = RoundedCornerShape(20.dp),
-        modifier = modifier
-            .defaultMinSize(minHeight = 100.dp)
-            .clickable { tile.onClick() },
+        modifier = modifier.defaultMinSize(minHeight = 100.dp).clickable { tile.onClick() },
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // Code chip 38x38
             Surface(
                 color = tile.tint,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.size(38.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = tile.code,
-                        fontFamily = CoordinateFont,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = tile.fg,
-                    )
+                    Text(tile.code, fontFamily = CoordinateFont, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = tile.fg)
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = tile.title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = (-0.005).em,
-                    lineHeight = 13.sp * 1.2f,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = tile.sub,
-                    fontSize = 11.sp,
-                    lineHeight = 11.sp * 1.35f,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(tile.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                Text(tile.sub, fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
 }
 
 @Composable
-private fun AppListRow(
-    icon: ImageVector,
-    title: String,
-    sub: String,
-    onClick: () -> Unit,
-) {
+private fun AppListRow(icon: ImageVector, title: String, sub: String, onClick: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -317,39 +239,13 @@ private fun AppListRow(
             modifier = Modifier.size(36.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             }
         }
-        Column(
-            modifier = Modifier.weight(1f),
-        ) {
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.005).em,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = sub,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(sub, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Icon(
-            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(24.dp),
-        )
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
     }
 }

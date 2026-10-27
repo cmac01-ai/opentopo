@@ -67,17 +67,17 @@ import org.opentopo.app.ui.theme.CoordinateFont
 fun SettingsScreen(
     userName: String = "",
     userOrg: String = "",
-    coordSystem: String = "EGSA87",
+    coordSystem: String = "SIRGAS2000 / UTM",
     numberFormatLabel: String = "thousands · space · 3 decimals",
-    heightReference: String = "Orthometric (HEPOS07)",
+    heightReference: String = "NMEA GGA · receptor",
     pointPrefix: String = "P###",
     averagingLabel: String = "10 epochs · 2 cm σH gate",
     themeLabel: String = "System",
-    mapLayersLabel: String = "OSM · Hellenic topo · Ktimatologio",
+    mapLayersLabel: String = "OpenStreetMap · pontos de campo",
     unitsLabel: String = "metric",
-    cloudSyncLabel: String = "opentopo.gr · last 4 min ago",
-    exportDefaultsLabel: String = "LandXML · UTF-8",
-    cacheLabel: String = "1.4 GB · 3,804 tiles",
+    cloudSyncLabel: String = "Somente neste dispositivo",
+    exportDefaultsLabel: String = "CSV · GeoJSON · DXF",
+    cacheLabel: String = "Cache local do mapa",
     amoledEnabled: Boolean = false,
     requireRtkFix: Boolean = true,
     onAmoledChange: (Boolean) -> Unit = {},
@@ -161,7 +161,7 @@ fun SettingsScreen(
             SettingsRow(
                 icon = Icons.Outlined.GpsFixed,
                 title = "Coordinate system",
-                sub = "EGSA87 / EPSG 2100",
+                sub = "SIRGAS2000 · UTM 18–25S / 18–22N",
                 onClick = onCoordSystemClick,
                 trailing = {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -318,8 +318,8 @@ private fun ProfileHero(
     userOrg: String,
     onClick: () -> Unit,
 ) {
-    val displayName = if (userName.isBlank()) "Κώστας Παπαδάκης" else userName
-    val displayOrg = if (userOrg.isBlank()) "Συνεργείο Αλίμου · Greek" else userOrg
+    val displayName = if (userName.isBlank()) "Usuário de campo" else userName
+    val displayOrg = if (userOrg.isBlank()) "Brasil · SIRGAS2000" else userOrg
     val initials = computeInitials(userName)
 
     Surface(
@@ -376,10 +376,10 @@ private fun ProfileHero(
 }
 
 private fun computeInitials(userName: String): String {
-    if (userName.isBlank()) return "KP"
+    if (userName.isBlank()) return "BR"
     val tokens = userName.trim().split(Regex("\\s+"))
     val chars = tokens.take(2).mapNotNull { it.firstOrNull() }
-    return chars.joinToString("").uppercase().ifBlank { "KP" }
+    return chars.joinToString("").uppercase().ifBlank { "BR" }
 }
 
 // ─────────────────────────── section helpers ───────────────────────────

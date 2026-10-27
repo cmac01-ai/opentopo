@@ -7,15 +7,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.opentopo.app.coordinates.CoordinateSystemService
 import org.opentopo.app.db.AppDatabase
 import org.opentopo.app.db.PointEntity
 import org.opentopo.app.gnss.GnssState
+import org.opentopo.app.geoid.GeoidModelService
+import org.opentopo.app.geoid.HeightModels
 import org.opentopo.transform.GeographicCoordinate
-import org.opentopo.transform.HeposTransform
 import org.opentopo.transform.ProjectedCoordinate
-import java.io.InputStream
 
 /**
  * Manages survey point recording with epoch averaging and quality filtering.
@@ -23,10 +25,9 @@ import java.io.InputStream
 class SurveyManager(
     private val db: AppDatabase,
     private val gnssState: GnssState,
-    gridDeStream: InputStream,
-    gridDnStream: InputStream,
+    private val coordinateSystem: CoordinateSystemService,
+    private val geoidModels: GeoidModelService,
 ) {
-    private val transform = HeposTransform(gridDeStream, gridDnStream)
     private val scope = CoroutineScope(Dispatchers.Main)
 
     private val _recordingState = MutableStateFlow(RecordingState())
@@ -35,9 +36,12 @@ class SurveyManager(
     private val _activeProjectId = MutableStateFlow<Long?>(null)
     val activeProjectId: StateFlow<Long?> = _activeProjectId.asStateFlow()
 
-    /** Live EGSA87 coordinates from current GNSS position. */
+    /** Live coordinates in the active project's projected CRS. */
     private val _projectedPosition = MutableStateFlow<ProjectedCoordinate?>(null)
     val projectedPosition: StateFlow<ProjectedCoordinate?> = _projectedPosition.asStateFlow()
+
+    private val _projectedCrsLabel = MutableStateFlow("SIRGAS2000 · UTM")
+    val projectedCrsLabel: StateFlow<String> = _projectedCrsLabel.asStateFlow()
 
     // Active recording mode
     private val _recordingMode = MutableStateFlow("point") // "point", "line", "polygon"
@@ -58,26 +62,42 @@ class SurveyManager(
     var minAccuracyM: Double = 0.0
     var requireRtkFix: Boolean = false
     var antennaHeight: Double? = null
+    var heightModel: String = HeightModels.RECEIVER
 
     init {
-        // Continuously transform live position to EGSA87
+        // Re-project whenever the GNSS position or active project CRS changes.
         scope.launch(Dispatchers.Default) {
-            gnssState.position.collect { pos ->
-                _projectedPosition.value = if (pos.hasFix) {
-                    try {
-                        transform.forward(GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0))
-                    } catch (_: Exception) {
-                        null
+            combine(gnssState.position, coordinateSystem.config) { pos, _ -> pos }
+                .collect { pos ->
+                    if (pos.hasFix) {
+                        try {
+                            val projected = coordinateSystem.project(
+                                GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0)
+                            )
+                            _projectedPosition.value = projected.coordinate
+                            _projectedCrsLabel.value = projected.label
+                        } catch (_: Exception) {
+                            _projectedPosition.value = null
+                        }
+                    } else {
+                        _projectedPosition.value = null
                     }
-                } else {
-                    null
                 }
-            }
         }
     }
 
     fun setActiveProject(id: Long?) {
         _activeProjectId.value = id
+        scope.launch(Dispatchers.IO) {
+            val project = id?.let { db.projectDao().getById(it) }
+            if (project != null) {
+                coordinateSystem.setConfig(
+                    project.coordinateSystem,
+                    project.utmZone,
+                    project.utmHemisphere,
+                )
+            }
+        }
     }
 
     /** Quick-record for FAB: uses active project with full averaging. */
@@ -92,7 +112,14 @@ class SurveyManager(
         startRecording(projectId, remarks, overrideEpochs = 1)
     }
 
-    fun startRecording(projectId: Long, remarks: String = "", overrideEpochs: Int = 0) {
+    fun startRecording(
+        projectId: Long,
+        remarks: String = "",
+        overrideEpochs: Int = 0,
+        pointIdOverride: String? = null,
+        attribute: String = "",
+        antennaHeightOverride: Double? = antennaHeight,
+    ) {
         val targetEpochs = if (overrideEpochs > 0) overrideEpochs else averagingSeconds
         averagingJob?.cancel()
         _recordingState.value = RecordingState(
@@ -145,7 +172,14 @@ class SurveyManager(
             }
 
             if (epochs.isNotEmpty()) {
-                val point = averageAndStore(projectId, epochs, remarks)
+                val point = averageAndStore(
+                    projectId = projectId,
+                    epochs = epochs,
+                    remarks = remarks,
+                    pointIdOverride = pointIdOverride,
+                    attribute = attribute,
+                    antennaHeightAtCapture = antennaHeightOverride,
+                )
                 _recordingState.value = RecordingState(
                     isRecording = false,
                     lastRecordedPoint = point,
@@ -191,19 +225,37 @@ class SurveyManager(
             val acc = gnssState.accuracy.value
             if (!pos.hasFix) return@launch
 
-            val projected = try {
-                transform.forward(GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0))
+            val projectedResult = try {
+                coordinateSystem.project(
+                    GeographicCoordinate(pos.latitude, pos.longitude, pos.altitude ?: 0.0)
+                )
             } catch (_: Exception) { null }
+            val projected = projectedResult?.coordinate
 
             val vertexNum = _vertexCount.value + 1
             val pointId = if (mode == "line") "L${featureId}-V${vertexNum}" else "PG${featureId}-V${vertexNum}"
+
+            val receiverSep = pos.geoidSeparation
+            val receiverEllipsoidal = when {
+                pos.altitude != null && receiverSep != null -> pos.altitude + receiverSep
+                else -> pos.altitude
+            }
+            val antenna = antennaHeight ?: 0.0
+            val pointEllipsoidal = receiverEllipsoidal?.minus(antenna)
+            val modelEval = if (heightModel == HeightModels.RECEIVER) null
+                else geoidModels.evaluate(heightModel, pos.latitude, pos.longitude)
+            val physicalHeight = when {
+                modelEval != null && pointEllipsoidal != null -> pointEllipsoidal - modelEval.factorM
+                pos.altitude != null -> pos.altitude - antenna
+                else -> null
+            }
 
             val point = PointEntity(
                 projectId = projectId,
                 pointId = pointId,
                 latitude = pos.latitude,
                 longitude = pos.longitude,
-                altitude = pos.altitude,
+                altitude = pointEllipsoidal,
                 easting = projected?.eastingM,
                 northing = projected?.northingM,
                 horizontalAccuracy = acc.horizontalAccuracyM,
@@ -216,8 +268,13 @@ class SurveyManager(
                 remarks = remarks,
                 layerType = layerType,
                 featureId = featureId,
-                geoidSeparation = gnssState.position.value.geoidSeparation,
-                orthometricHeight = pos.altitude, // GGA altitude = MSL
+                geoidSeparation = modelEval?.factorM ?: receiverSep,
+                orthometricHeight = physicalHeight,
+                heightModel = modelEval?.model ?: HeightModels.RECEIVER,
+                heightUncertainty = modelEval?.uncertaintyM,
+                crsEpsg = projectedResult?.epsg,
+                utmZone = projectedResult?.utmZone,
+                utmHemisphere = projectedResult?.utmHemisphere?.code?.toString(),
             )
             db.pointDao().insert(point)
             _vertexCount.value = vertexNum
@@ -259,7 +316,7 @@ class SurveyManager(
     suspend fun computePolygonArea(featureId: Long): Double {
         val vertices = db.pointDao().getByFeatureOnce(featureId)
         if (vertices.size < 3) return 0.0
-        // Use EGSA87 projected coordinates for area (meters)
+        // Use coordinates already stored in the project's projected CRS (meters).
         val coords = vertices.mapNotNull { pt ->
             if (pt.easting != null && pt.northing != null) pt.easting to pt.northing else null
         }
@@ -289,32 +346,62 @@ class SurveyManager(
         projectId: Long,
         epochs: List<EpochSample>,
         remarks: String,
+        pointIdOverride: String?,
+        attribute: String,
+        antennaHeightAtCapture: Double?,
     ): PointEntity {
         val avgLat = epochs.map { it.latitude }.average()
         val avgLon = epochs.map { it.longitude }.average()
-        val avgAlt = epochs.mapNotNull { it.altitude }.takeIf { it.isNotEmpty() }?.average()
-        val avgGeoidSep = epochs.mapNotNull { it.geoidSeparation }
+        // GGA altitude is the receiver's physical/MSL height. When GGA also
+        // carries geoid separation, h = H + N gives the ellipsoidal ARP height.
+        val avgReceiverPhysical = epochs.mapNotNull { it.altitude }
             .takeIf { it.isNotEmpty() }?.average()
-        val orthoHeight = avgAlt // GGA altitude is nominally MSL
+        val avgReceiverSeparation = epochs.mapNotNull { it.geoidSeparation }
+            .takeIf { it.isNotEmpty() }?.average()
+        val receiverEllipsoidal = when {
+            avgReceiverPhysical != null && avgReceiverSeparation != null ->
+                avgReceiverPhysical + avgReceiverSeparation
+            else -> avgReceiverPhysical
+        }
+        val antenna = antennaHeightAtCapture ?: 0.0
+        val pointEllipsoidal = receiverEllipsoidal?.minus(antenna)
+
+        val modelEval = if (heightModel == HeightModels.RECEIVER) {
+            null
+        } else {
+            geoidModels.evaluate(heightModel, avgLat, avgLon)
+        }
+        val physicalHeight = when {
+            modelEval != null && pointEllipsoidal != null ->
+                pointEllipsoidal - modelEval.factorM
+            avgReceiverPhysical != null ->
+                avgReceiverPhysical - antenna
+            else -> null
+        }
+        val conversionFactor = modelEval?.factorM ?: avgReceiverSeparation
+        val storedHeightModel = modelEval?.model ?: HeightModels.RECEIVER
+
         val avgHAcc = epochs.mapNotNull { it.horizontalAccuracy }.takeIf { it.isNotEmpty() }?.average()
         val avgVAcc = epochs.mapNotNull { it.verticalAccuracy }.takeIf { it.isNotEmpty() }?.average()
         val bestFix = epochs.maxOf { it.fixQuality }
         val avgSats = epochs.map { it.numSatellites }.average().toInt()
         val avgHdop = epochs.mapNotNull { it.hdop }.takeIf { it.isNotEmpty() }?.average()
 
-        val projected = transform.forward(
-            GeographicCoordinate(avgLat, avgLon, avgAlt ?: 0.0)
+        val projectedResult = coordinateSystem.project(
+            GeographicCoordinate(avgLat, avgLon, pointEllipsoidal ?: 0.0)
         )
+        val projected = projectedResult.coordinate
 
         val count = db.pointDao().countByProject(projectId)
-        val pointId = "P%03d".format(count + 1)
+        val pointId = pointIdOverride?.trim()?.takeIf { it.isNotBlank() }
+            ?: "P%03d".format(count + 1)
 
         val point = PointEntity(
             projectId = projectId,
             pointId = pointId,
             latitude = avgLat,
             longitude = avgLon,
-            altitude = avgAlt,
+            altitude = pointEllipsoidal,
             easting = projected.eastingM,
             northing = projected.northingM,
             horizontalAccuracy = avgHAcc,
@@ -323,10 +410,16 @@ class SurveyManager(
             numSatellites = avgSats,
             hdop = avgHdop,
             averagingSeconds = epochs.size,
-            antennaHeight = antennaHeight,
+            antennaHeight = antennaHeightAtCapture,
+            attribute = attribute.trim(),
             remarks = remarks,
-            geoidSeparation = avgGeoidSep,
-            orthometricHeight = orthoHeight,
+            geoidSeparation = conversionFactor,
+            orthometricHeight = physicalHeight,
+            heightModel = storedHeightModel,
+            heightUncertainty = modelEval?.uncertaintyM,
+            crsEpsg = projectedResult.epsg,
+            utmZone = projectedResult.utmZone,
+            utmHemisphere = projectedResult.utmHemisphere?.code?.toString(),
         )
 
         val id = db.pointDao().insert(point)

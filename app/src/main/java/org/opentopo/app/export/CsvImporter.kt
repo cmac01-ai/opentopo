@@ -6,14 +6,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 /**
- * Imports survey points from CSV files produced by [CsvExporter].
- *
- * Expected column order (matching CsvExporter):
- * ID, Easting_EGSA87, Northing_EGSA87, Latitude_WGS84, Longitude_WGS84,
- * Altitude, Ortho_Height, Geoid_N, H_Accuracy, V_Accuracy, Fix, Satellites,
- * HDOP, Averaging_s, DateTime, Remarks
- *
- * Legacy format (without Ortho_Height/Geoid_N) is also supported.
+ * Imports both the Brazil CSV format and legacy OpenTopo CSV files.
  */
 object CsvImporter {
 
@@ -21,21 +14,71 @@ object CsvImporter {
 
     fun import(input: InputStream, projectId: Long): List<PointEntity> {
         val reader = input.bufferedReader()
-        val header = reader.readLine() ?: return emptyList() // skip header
-        val hasGeoid = header.contains("Ortho_Height")
+        val rawHeader = reader.readLine() ?: return emptyList()
+        val header = parseCsvFields(rawHeader).map { it.trim() }
+        val newFormat = header.any { it.equals("Latitude_SIRGAS2000", ignoreCase = true) }
 
         return reader.lineSequence()
             .filter { it.isNotBlank() }
-            .mapNotNull { line -> parseLine(line, projectId, hasGeoid) }
+            .mapNotNull { line ->
+                if (newFormat) parseBrazilLine(line, projectId, header)
+                else parseLegacyLine(line, projectId, rawHeader)
+            }
             .toList()
     }
 
-    private fun parseLine(line: String, projectId: Long, hasGeoid: Boolean): PointEntity? {
+    private fun parseBrazilLine(
+        line: String,
+        projectId: Long,
+        header: List<String>,
+    ): PointEntity? {
+        val fields = parseCsvFields(line)
+        fun value(vararg names: String): String? {
+            val idx = header.indexOfFirst { h -> names.any { n -> h.equals(n, ignoreCase = true) } }
+            return if (idx >= 0) fields.getOrNull(idx)?.trim() else null
+        }
+
+        val lat = value("Latitude_SIRGAS2000")?.toDoubleOrNull() ?: return null
+        val lon = value("Longitude_SIRGAS2000")?.toDoubleOrNull() ?: return null
+
+        return PointEntity(
+            projectId = projectId,
+            pointId = value("ID").orEmpty().ifBlank { "P" },
+            attribute = value("Attribute").orEmpty(),
+            easting = value("Easting_UTM")?.toDoubleOrNull(),
+            northing = value("Northing_UTM")?.toDoubleOrNull(),
+            crsEpsg = value("EPSG")?.toIntOrNull(),
+            utmZone = value("UTM_Zone")?.toIntOrNull(),
+            utmHemisphere = value("Hemisphere")?.uppercase()?.takeIf { it == "N" || it == "S" },
+            latitude = lat,
+            longitude = lon,
+            altitude = value("Ellipsoidal_Height", "Altitude")?.toDoubleOrNull(),
+            orthometricHeight = value("Physical_Height", "Ortho_Height")?.toDoubleOrNull(),
+            heightModel = value("Height_Model"),
+            geoidSeparation = value("Height_Factor", "Geoid_N")?.toDoubleOrNull(),
+            heightUncertainty = value("Height_Uncertainty")?.toDoubleOrNull(),
+            antennaHeight = value("Antenna_Height")?.toDoubleOrNull(),
+            horizontalAccuracy = value("H_Accuracy")?.toDoubleOrNull(),
+            verticalAccuracy = value("V_Accuracy")?.toDoubleOrNull(),
+            fixQuality = value("Fix")?.let { parseFixLabel(it) } ?: 0,
+            numSatellites = value("Satellites")?.toIntOrNull() ?: 0,
+            hdop = value("HDOP")?.toDoubleOrNull(),
+            averagingSeconds = value("Averaging_s")?.toIntOrNull() ?: 0,
+            timestamp = value("DateTime")?.let { parseTimestamp(it) } ?: System.currentTimeMillis(),
+            remarks = value("Remarks").orEmpty(),
+        )
+    }
+
+    private fun parseLegacyLine(
+        line: String,
+        projectId: Long,
+        header: String,
+    ): PointEntity? {
         val fields = parseCsvFields(line)
         if (fields.size < 5) return null
-        // When hasGeoid is true, columns 6-7 are Ortho_Height and Geoid_N,
-        // shifting subsequent fields by 2.
+        val hasGeoid = header.contains("Ortho_Height")
         val offset = if (hasGeoid) 2 else 0
+
         return try {
             PointEntity(
                 projectId = projectId,
@@ -62,7 +105,6 @@ object CsvImporter {
         }
     }
 
-    /** Reverse of [CsvExporter.fixLabel]. */
     private fun parseFixLabel(label: String): Int = when (label.uppercase()) {
         "RTK_FIX" -> 4
         "RTK_FLOAT" -> 5
@@ -73,16 +115,8 @@ object CsvImporter {
     }
 
     private fun parseTimestamp(value: String): Long? =
-        try {
-            dateFormat.parse(value)?.time
-        } catch (_: Exception) {
-            null
-        }
+        try { dateFormat.parse(value)?.time } catch (_: Exception) { null }
 
-    /**
-     * Splits a CSV line respecting quoted fields (handles commas and escaped
-     * double-quotes inside quoted values).
-     */
     private fun parseCsvFields(line: String): List<String> {
         val fields = mutableListOf<String>()
         val current = StringBuilder()
@@ -95,7 +129,7 @@ object CsvImporter {
                 c == '"' && inQuotes -> {
                     if (i + 1 < line.length && line[i + 1] == '"') {
                         current.append('"')
-                        i++ // skip escaped quote
+                        i++
                     } else {
                         inQuotes = false
                     }

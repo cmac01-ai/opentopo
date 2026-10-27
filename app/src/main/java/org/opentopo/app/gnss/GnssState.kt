@@ -33,10 +33,16 @@ class GnssState : NmeaListener {
     private val _activeTransport = MutableStateFlow<Transport?>(null)
     val activeTransport: StateFlow<Transport?> = _activeTransport.asStateFlow()
 
-    // Accumulate GSV messages across a sequence
-    private val gsvAccumulator = mutableMapOf<Constellation, MutableList<SatelliteInfo>>()
-    private var gsvExpectedMessages = mutableMapOf<Constellation, Int>()
-    private var gsvReceivedMessages = mutableMapOf<Constellation, Int>()
+    // Accumulate GSV messages across sequences. u-blox may emit one sequence
+    // per signal (L1/L2/E1/E5...), so constellation alone is not a unique key.
+    private data class GsvGroupKey(val constellation: Constellation, val signalId: Int?)
+    private data class CompletedGsv(val timestampMs: Long, val satellites: List<SatelliteInfo>)
+
+    private val gsvAccumulator = mutableMapOf<GsvGroupKey, MutableList<SatelliteInfo>>()
+    private val gsvExpectedMessages = mutableMapOf<GsvGroupKey, Int>()
+    private val gsvReceivedMessages = mutableMapOf<GsvGroupKey, Int>()
+    private val completedGsv = mutableMapOf<GsvGroupKey, CompletedGsv>()
+    private val activePrnsByConstellation = mutableMapOf<Constellation, Set<Int>>()
 
     fun setConnectionStatus(status: ConnectionStatus) {
         _connectionStatus.value = status
@@ -82,6 +88,7 @@ class GnssState : NmeaListener {
             fixDescription = data.fixDescription,
             numSatellites = data.numSatellites,
             hdop = data.hdop,
+            ageOfDgpsSeconds = data.ageOfDgps,
             time = data.time,
             hasFix = data.quality > 0,
         )
@@ -114,28 +121,51 @@ class GnssState : NmeaListener {
     }
 
     override fun onGsa(data: GsaData) {
+        if (data.constellation != Constellation.UNKNOWN) {
+            activePrnsByConstellation[data.constellation] = data.satellitePrns.toSet()
+        }
+        val keys = activePrnsByConstellation.flatMap { (constellation, prns) ->
+            prns.map { prn -> SatelliteKey(constellation, prn) }
+        }.toSet()
+        val unionPrns = if (keys.isNotEmpty()) {
+            keys.map { it.prn }.distinct()
+        } else {
+            data.satellitePrns
+        }
         _accuracy.value = _accuracy.value.copy(
             fixType = data.fixType,
             pdop = data.pdop,
             hdop = data.hdop,
             vdop = data.vdop,
-            activeSatellitePrns = data.satellitePrns,
+            activeSatellitePrns = unionPrns,
+            activeSatelliteKeys = keys,
         )
     }
 
     override fun onGsv(data: GsvData) {
-        val constellation = data.constellation
+        val key = GsvGroupKey(data.constellation, data.signalId)
         if (data.messageNumber == 1) {
-            gsvAccumulator[constellation] = mutableListOf()
-            gsvExpectedMessages[constellation] = data.totalMessages
-            gsvReceivedMessages[constellation] = 0
+            gsvAccumulator[key] = mutableListOf()
+            gsvExpectedMessages[key] = data.totalMessages
+            gsvReceivedMessages[key] = 0
         }
-        gsvAccumulator[constellation]?.addAll(data.satellites)
-        gsvReceivedMessages[constellation] = (gsvReceivedMessages[constellation] ?: 0) + 1
+        gsvAccumulator[key]?.addAll(data.satellites)
+        gsvReceivedMessages[key] = (gsvReceivedMessages[key] ?: 0) + 1
 
-        // When we've received all messages for this constellation, update state
-        if (gsvReceivedMessages[constellation] == gsvExpectedMessages[constellation]) {
-            val allSatellites = gsvAccumulator.values.flatten()
+        if (gsvReceivedMessages[key] == gsvExpectedMessages[key]) {
+            completedGsv[key] = CompletedGsv(
+                timestampMs = System.currentTimeMillis(),
+                satellites = gsvAccumulator[key].orEmpty().toList(),
+            )
+
+            val now = System.currentTimeMillis()
+            completedGsv.entries.removeAll { now - it.value.timestampMs > 10_000L }
+
+            val allSatellites = completedGsv.values
+                .flatMap { it.satellites }
+                .filter { it.constellation != Constellation.UNKNOWN }
+                .distinctBy { SatelliteKey(it.constellation, it.prn) }
+
             _satellites.value = SatelliteState(
                 satellites = allSatellites,
                 totalInView = allSatellites.size,
@@ -161,6 +191,7 @@ data class PositionState(
     val fixDescription: String = "No fix",
     val numSatellites: Int = 0,
     val hdop: Double? = null,
+    val ageOfDgpsSeconds: Double? = null,
     val time: String = "",
     val date: String = "",
     val speedKnots: Double? = null,
@@ -174,6 +205,7 @@ data class AccuracyState(
     val hdop: Double? = null,
     val vdop: Double? = null,
     val activeSatellitePrns: List<Int> = emptyList(),
+    val activeSatelliteKeys: Set<SatelliteKey> = emptySet(),
     val latitudeErrorM: Double? = null,
     val longitudeErrorM: Double? = null,
     val altitudeErrorM: Double? = null,
@@ -189,6 +221,11 @@ data class AccuracyState(
             return hdop?.times(2.5) // rough HDOP-to-accuracy approximation
         }
 }
+
+data class SatelliteKey(
+    val constellation: Constellation,
+    val prn: Int,
+)
 
 data class SatelliteState(
     val satellites: List<SatelliteInfo> = emptyList(),

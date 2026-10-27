@@ -1,5 +1,7 @@
 package org.opentopo.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.Code
@@ -26,8 +30,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,17 +41,96 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.opentopo.app.db.AppDatabase
+import org.opentopo.app.db.ProjectEntity
+import org.opentopo.app.geoid.GeoidModelService
+import org.opentopo.app.geoid.HeightModels
+import org.opentopo.app.survey.SurveyManager
 import org.opentopo.app.ui.theme.CoordinateFont
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsPanel(modifier: Modifier = Modifier) {
-    val activity = LocalContext.current as? org.opentopo.app.MainActivity
+fun SettingsPanel(
+    db: AppDatabase,
+    surveyManager: SurveyManager?,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val activity = context as? org.opentopo.app.MainActivity
     val prefs = activity?.prefs
     val scope = rememberCoroutineScope()
+    val geoidModels = remember { GeoidModelService(context.applicationContext) }
+    var geoidFilesVersion by remember { mutableIntStateOf(0) }
+
+    val hgeoFactorReady = remember(geoidFilesVersion) {
+        geoidModels.hasFile(GeoidModelService.HGEO_FACTOR_FILE)
+    }
+    val hgeoUncertaintyReady = remember(geoidFilesVersion) {
+        geoidModels.hasFile(GeoidModelService.HGEO_UNCERTAINTY_FILE)
+    }
+    val mapgeoReady = remember(geoidFilesVersion) {
+        geoidModels.hasFile(GeoidModelService.MAPGEO_FILE)
+    }
+
+    fun importGeoidFile(uri: android.net.Uri?, target: String, label: String) {
+        if (uri == null) return
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { geoidModels.importFile(uri, target) }
+                geoidFilesVersion++
+                android.widget.Toast.makeText(
+                    context,
+                    "$label importado e disponível offline.",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(
+                    context,
+                    "Falha ao importar $label: ${e.message ?: "arquivo inválido"}",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
+    val hgeoFactorLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        importGeoidFile(uri, GeoidModelService.HGEO_FACTOR_FILE, "hgeoHNOR2020 · fator")
+    }
+    val hgeoUncertaintyLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        importGeoidFile(uri, GeoidModelService.HGEO_UNCERTAINTY_FILE, "hgeoHNOR2020 · incerteza")
+    }
+    val mapgeoLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        importGeoidFile(uri, GeoidModelService.MAPGEO_FILE, "MAPGEO2015")
+    }
+
+    val activeProjectId by surveyManager?.activeProjectId?.collectAsState()
+        ?: remember { mutableStateOf<Long?>(null) }
+    var activeProject by remember { mutableStateOf<ProjectEntity?>(null) }
+
+    LaunchedEffect(activeProjectId) {
+        activeProject = activeProjectId?.let { db.projectDao().getById(it) }
+    }
+
+    suspend fun updateProject(transform: (ProjectEntity) -> ProjectEntity) {
+        val current = activeProject ?: return
+        val updated = transform(current).copy(updatedAt = System.currentTimeMillis())
+        db.projectDao().update(updated)
+        activeProject = updated
+        surveyManager?.setActiveProject(updated.id)
+    }
 
     // Collect all settings
+    val antennaHeight by prefs?.antennaHeight?.collectAsState(initial = "1.80")
+        ?: remember { mutableStateOf("1.80") }
     val averagingSeconds by prefs?.averagingSeconds?.collectAsState(initial = 5)
         ?: remember { mutableStateOf(5) }
     val minAccuracy by prefs?.minAccuracyM?.collectAsState(initial = "0.05")
@@ -62,13 +147,142 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
         ?: remember { mutableStateOf(false) }
     val preferReceiverGeoid by prefs?.preferReceiverGeoid?.collectAsState(initial = false)
         ?: remember { mutableStateOf(false) }
+    val heightModel by prefs?.heightModel?.collectAsState(initial = HeightModels.RECEIVER)
+        ?: remember { mutableStateOf(HeightModels.RECEIVER) }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        // ── Project coordinate reference system ──
+        Text(
+            "PROJETO · COORDENADAS",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column {
+                ListItem(
+                    headlineContent = { Text(activeProject?.name ?: "Nenhum projeto ativo") },
+                    supportingContent = {
+                        Text(
+                            if (activeProject != null) "SIRGAS2000 / UTM · GRS80"
+                            else "Selecione ou crie um projeto para alterar fuso e hemisfério"
+                        )
+                    },
+                )
+
+                if (activeProject != null) {
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("Hemisfério") },
+                        supportingContent = { Text("Automático usa o sinal da latitude GNSS") },
+                        trailingContent = {
+                            var expanded by remember { mutableStateOf(false) }
+                            val current = activeProject?.utmHemisphere ?: "AUTO"
+                            Box {
+                                TextButton(onClick = { expanded = true }) {
+                                    Text(
+                                        when (current) {
+                                            "NORTH" -> "Norte"
+                                            "SOUTH" -> "Sul"
+                                            else -> "Automático"
+                                        },
+                                        fontFamily = CoordinateFont,
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                ) {
+                                    listOf(
+                                        "AUTO" to "Automático",
+                                        "NORTH" to "Norte",
+                                        "SOUTH" to "Sul",
+                                    ).forEach { (value, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                scope.launch {
+                                                    updateProject { project ->
+                                                        project.copy(
+                                                            utmHemisphere = value,
+                                                            utmZone = if (value == "NORTH" && (project.utmZone ?: 18) > 22) {
+                                                                null
+                                                            } else {
+                                                                project.utmZone
+                                                            },
+                                                        )
+                                                    }
+                                                }
+                                                expanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    )
+
+                    HorizontalDivider()
+                    ListItem(
+                        headlineContent = { Text("Fuso UTM") },
+                        supportingContent = { Text("Automático usa a longitude GNSS") },
+                        trailingContent = {
+                            var expanded by remember { mutableStateOf(false) }
+                            val project = activeProject!!
+                            val suffix = when (project.utmHemisphere) {
+                                "NORTH" -> "N"
+                                "SOUTH" -> "S"
+                                else -> ""
+                            }
+                            Box {
+                                TextButton(onClick = { expanded = true }) {
+                                    Text(
+                                        project.utmZone?.let { "$it$suffix" } ?: "Automático",
+                                        fontFamily = CoordinateFont,
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Automático") },
+                                        onClick = {
+                                            scope.launch { updateProject { it.copy(utmZone = null) } }
+                                            expanded = false
+                                        },
+                                    )
+                                    val zones = if (project.utmHemisphere == "NORTH") 18..22 else 18..25
+                                    zones.forEach { zone ->
+                                        DropdownMenuItem(
+                                            text = { Text("Fuso $zone$suffix") },
+                                            onClick = {
+                                                scope.launch {
+                                                    updateProject { it.copy(utmZone = zone) }
+                                                }
+                                                expanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
         // ── Recording settings ──
         Text(
             "RECORDING",
@@ -82,8 +296,26 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
         ) {
             Column {
                 ListItem(
-                    headlineContent = { Text("Averaging time") },
-                    supportingContent = { Text("Duration for epoch averaging") },
+                    headlineContent = { Text("Altura da antena (m)") },
+                    supportingContent = { Text("Altura do ponto medido até o ARP/ referência usada") },
+                    trailingContent = {
+                        OutlinedTextField(
+                            value = antennaHeight,
+                            onValueChange = { value ->
+                                scope.launch { prefs?.setAntennaHeight(value) }
+                            },
+                            modifier = Modifier.width(120.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = CoordinateFont,
+                            ),
+                            singleLine = true,
+                        )
+                    },
+                )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("Tempo de média") },
+                    supportingContent = { Text("Duração da média de épocas") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -107,7 +339,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("Min accuracy (m)") },
+                    headlineContent = { Text("Precisão máxima (m)") },
                     trailingContent = {
                         OutlinedTextField(
                             value = minAccuracy,
@@ -122,8 +354,8 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("Require RTK Fix") },
-                    supportingContent = { Text("Only accept RTK fix quality") },
+                    headlineContent = { Text("Exigir RTK Fix") },
+                    supportingContent = { Text("Só grava ponto quando a solução estiver FIX") },
                     trailingContent = {
                         Switch(
                             checked = requireRtk,
@@ -138,7 +370,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
 
         // ── Connection settings ──
         Text(
-            "CONNECTION",
+            "CONEXÃO",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
@@ -149,7 +381,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
         ) {
             Column {
                 ListItem(
-                    headlineContent = { Text("Baud rate") },
+                    headlineContent = { Text("Baud rate / serial") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -174,7 +406,10 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("GGA interval") },
+                    headlineContent = { Text("Intervalo GGA para NTRIP") },
+                    supportingContent = {
+                        Text("Envio da posição ao caster VRS; não é a taxa de recebimento RTCM")
+                    },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
                         Box {
@@ -183,7 +418,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                                 Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
                             }
                             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                listOf(5, 10, 15, 30, 60).forEach { secs ->
+                                listOf(1, 2, 5, 10, 15, 30, 60).forEach { secs ->
                                     DropdownMenuItem(
                                         text = { Text("${secs}s") },
                                         onClick = {
@@ -201,7 +436,7 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
 
         // ── Display settings ──
         Text(
-            "DISPLAY",
+            "EXIBIÇÃO",
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
@@ -212,8 +447,8 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
         ) {
             Column {
                 ListItem(
-                    headlineContent = { Text("Glove Mode") },
-                    supportingContent = { Text("64dp targets, volume buttons, larger fonts") },
+                    headlineContent = { Text("Modo luvas") },
+                    supportingContent = { Text("Alvos maiores e botões de volume para campo") },
                     trailingContent = {
                         Switch(
                             checked = gloveMode,
@@ -225,10 +460,10 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 )
                 HorizontalDivider()
                 ListItem(
-                    headlineContent = { Text("Coordinates") },
+                    headlineContent = { Text("Formato de coordenadas") },
                     trailingContent = {
                         var expanded by remember { mutableStateOf(false) }
-                        val formatLabels = listOf("EGSA87 (E/N)", "WGS84 Decimal", "WGS84 DMS")
+                        val formatLabels = listOf("SIRGAS2000 / UTM", "SIRGAS2000 Decimal", "Graus/min/seg")
                         Box {
                             TextButton(onClick = { expanded = true }) {
                                 Text(formatLabels.getOrElse(coordFormat) { formatLabels[0] })
@@ -249,42 +484,129 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                     },
                 )
                 HorizontalDivider()
-                ListItem(
-                    headlineContent = { Text("Geoid source") },
-                    supportingContent = {
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Referência de altura") },
+                        supportingContent = {
+                            Text(
+                                when (heightModel) {
+                                    HeightModels.HGEONOR2020_IMBITUBA ->
+                                        "hgeoHNOR2020 · Imbituba · altitude normal"
+                                    HeightModels.MAPGEO2015 ->
+                                        "MAPGEO2015 · altitude ortométrica"
+                                    else ->
+                                        "Receptor GNSS · NMEA GGA"
+                                }
+                            )
+                        },
+                        trailingContent = {
+                            var expanded by remember { mutableStateOf(false) }
+                            Box {
+                                TextButton(onClick = { expanded = true }) {
+                                    Text(
+                                        when (heightModel) {
+                                            HeightModels.HGEONOR2020_IMBITUBA -> "hgeoHNOR2020"
+                                            HeightModels.MAPGEO2015 -> "MAPGEO2015"
+                                            else -> "Receptor"
+                                        }
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Receptor GNSS / NMEA GGA") },
+                                        onClick = {
+                                            scope.launch {
+                                                prefs?.setHeightModel(HeightModels.RECEIVER)
+                                            }
+                                            expanded = false
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                when {
+                                                    hgeoFactorReady && hgeoUncertaintyReady ->
+                                                        "hgeoHNOR2020 · Imbituba"
+                                                    hgeoFactorReady ->
+                                                        "hgeoHNOR2020 · importe a incerteza"
+                                                    else ->
+                                                        "hgeoHNOR2020 · importe as grades"
+                                                }
+                                            )
+                                        },
+                                        enabled = hgeoFactorReady && hgeoUncertaintyReady,
+                                        onClick = {
+                                            scope.launch {
+                                                prefs?.setHeightModel(
+                                                    HeightModels.HGEONOR2020_IMBITUBA
+                                                )
+                                            }
+                                            expanded = false
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (mapgeoReady)
+                                                    "MAPGEO2015"
+                                                else
+                                                    "MAPGEO2015 · importe a grade"
+                                            )
+                                        },
+                                        enabled = mapgeoReady,
+                                        onClick = {
+                                            scope.launch {
+                                                prefs?.setHeightModel(HeightModels.MAPGEO2015)
+                                            }
+                                            expanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        },
+                    )
+                    Text(
+                        "hgeoHNOR2020 usa spline bicúbica, como o interpolador do IBGE. " +
+                            "As grades são copiadas para o armazenamento interno e funcionam offline.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                    TextButton(
+                        onClick = { hgeoFactorLauncher.launch(arrayOf("text/plain", "text/*", "application/octet-stream")) },
+                    ) {
                         Text(
-                            if (preferReceiverGeoid)
-                                "Receiver EGM96 (GGA geoid separation)"
+                            if (hgeoFactorReady)
+                                "✓ hgeoHNOR2020 · fator de conversão"
                             else
-                                "Greek HEPOS07 grid (recommended)",
+                                "Importar hgeoHNOR2020 · fator de conversão"
                         )
-                    },
-                    trailingContent = {
-                        var expanded by remember { mutableStateOf(false) }
-                        Box {
-                            TextButton(onClick = { expanded = true }) {
-                                Text(if (preferReceiverGeoid) "Receiver" else "Greek")
-                                Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
-                            }
-                            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Greek HEPOS07") },
-                                    onClick = {
-                                        scope.launch { prefs?.setPreferReceiverGeoid(false) }
-                                        expanded = false
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Receiver EGM96") },
-                                    onClick = {
-                                        scope.launch { prefs?.setPreferReceiverGeoid(true) }
-                                        expanded = false
-                                    },
-                                )
-                            }
-                        }
-                    },
-                )
+                    }
+                    TextButton(
+                        onClick = { hgeoUncertaintyLauncher.launch(arrayOf("text/plain", "text/*", "application/octet-stream")) },
+                    ) {
+                        Text(
+                            if (hgeoUncertaintyReady)
+                                "✓ hgeoHNOR2020 · incerteza"
+                            else
+                                "Importar hgeoHNOR2020 · incerteza"
+                        )
+                    }
+                    TextButton(
+                        onClick = { mapgeoLauncher.launch(arrayOf("text/plain", "text/*", "application/octet-stream")) },
+                    ) {
+                        Text(
+                            if (mapgeoReady)
+                                "✓ MAPGEO2015 · SIRGAS2000"
+                            else
+                                "Importar MAPGEO2015 · SIRGAS2000"
+                        )
+                    }
+                }
             }
         }
 
@@ -299,10 +621,10 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("About", style = MaterialTheme.typography.titleMedium)
+                Text("Sobre", style = MaterialTheme.typography.titleMedium)
                 Text("OpenTopo ${appVersion()}", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "Open-source GNSS surveying for Android",
+                    "Levantamento GNSS RTK open source para Android",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -310,11 +632,11 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 val context = LocalContext.current
                 val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                 TextButton(
-                    onClick = { uriHandler.openUri("https://github.com/ppapadeas/opentopo") },
+                    onClick = { uriHandler.openUri("https://github.com/cmac01-ai/opentopo") },
                 ) {
                     Icon(Icons.Outlined.Code, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Source code on GitHub")
+                    Text("Código-fonte no GitHub")
                 }
                 Spacer(Modifier.height(8.dp))
                 Text("CREDITS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -323,16 +645,14 @@ fun SettingsPanel(modifier: Modifier = Modifier) {
                 Text("Developed by Pierros Papadeas", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(4.dp))
 
-                Text("Transformation engine", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("HEPOS parameters: Ktimatologio S.A.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Correction grids: dE/dN V1.0 (2km), Ktimatologio S.A.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("Sistema geodésico", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("SIRGAS2000 / UTM · elipsoide GRS80", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("Fusos brasileiros: 18–25S e 18–22N", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
 
                 Spacer(Modifier.height(4.dp))
-                Text("Map data", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Basemap: OpenStreetMap contributors (via vathra.xyz)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Orthophoto: Hellenic Cadastre (Ktimatologio)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Contours: SRTM elevation data (via vathra.xyz)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-                Text("Trig points: Hellenic Army Geographical Service (GYS) via vathra.xyz", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("Dados e serviços", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Mapa: OpenStreetMap contributors", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text("NTRIP: compatível com RBMC-IP / IBGE", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
 
                 Spacer(Modifier.height(4.dp))
                 Text("Libraries", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

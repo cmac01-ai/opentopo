@@ -16,9 +16,9 @@ import java.io.BufferedInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.HttpURLConnection
 import java.net.Socket
-import java.net.URL
+import java.net.SocketTimeoutException
+import javax.net.ssl.SSLSocketFactory
 import java.util.Base64
 import kotlin.math.abs
 import kotlin.math.floor
@@ -119,7 +119,7 @@ class NtripClient(
             try {
                 doConnect(config)
                 reconnectDelay = RECONNECT_BASE_DELAY_MS
-                startGgaForwarding()
+                if (config.sendGga) startGgaForwarding()
                 readRtcmStream()
             } catch (e: CancellationException) {
                 throw e
@@ -144,8 +144,7 @@ class NtripClient(
     private fun doConnect(config: NtripConfig) {
         Log.d(TAG, "connecting to ${config.host}:${config.port}/${config.mountpoint}")
 
-        val sock = Socket(config.host, config.port)
-        sock.soTimeout = 60_000 // VRS casters can take time after GGA
+        val sock = createSocket(config, 60_000)
         socket = sock
 
         val output = sock.getOutputStream()
@@ -197,8 +196,8 @@ class NtripClient(
             error = null,
         )
 
-        // Send initial GGA immediately — VRS casters need this before sending data
-        sendGga(output)
+        // Send initial GGA only when enabled for this profile.
+        if (config.sendGga) sendGga(output)
     }
 
     /** Build and send a GGA sentence. Uses raw GGA if available, otherwise generates one. */
@@ -299,23 +298,67 @@ class NtripClient(
     // ── Sourcetable (simple HTTP GET, no bidirectional needed) ──
 
     private fun doFetchSourcetable(config: NtripConfig): List<NtripMountpoint> {
-        val url = URL("http://${config.host}:${config.port}/")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Ntrip-Version", "Ntrip/2.0")
-            if (config.username.isNotBlank()) {
-                val credentials = "${config.username}:${config.password}"
-                val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray())
-                setRequestProperty("Authorization", "Basic $encoded")
+        val sock = createSocket(config, 10_000)
+        try {
+            val output = sock.getOutputStream()
+            val request = buildString {
+                append("GET / HTTP/1.0\r\n")
+                append("User-Agent: $USER_AGENT\r\n")
+                append("Ntrip-Version: Ntrip/2.0\r\n")
+                if (config.username.isNotBlank()) {
+                    val credentials = "${config.username}:${config.password}"
+                    val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray())
+                    append("Authorization: Basic $encoded\r\n")
+                }
+                append("\r\n")
             }
-            connectTimeout = 10_000
-            readTimeout = 10_000
-        }
+            output.write(request.toByteArray())
+            output.flush()
 
-        val response = conn.inputStream.bufferedReader().readText()
-        conn.disconnect()
-        return parseSourcetable(response)
+            val input = sock.getInputStream()
+            val statusLine = readLine(input)
+                ?: throw IOException("No response from NTRIP caster")
+
+            val httpOk = statusLine.startsWith("HTTP/") && statusLine.contains("200")
+            val tableOk = statusLine.startsWith("SOURCETABLE") && statusLine.contains("200")
+            val icyOk = statusLine.startsWith("ICY ") && statusLine.contains("200")
+            if (!(httpOk || tableOk || icyOk)) {
+                throw IOException("NTRIP sourcetable: $statusLine")
+            }
+
+            if (statusLine.startsWith("HTTP/")) {
+                while (true) {
+                    val header = readLine(input) ?: break
+                    if (header.isBlank()) break
+                }
+            }
+
+            val body = StringBuilder()
+            try {
+                while (true) {
+                    val line = readLine(input) ?: break
+                    if (line.startsWith("STR;")) {
+                        body.append(line).append('\n')
+                    }
+                    if (line.startsWith("ENDSOURCETABLE")) break
+                }
+            } catch (_: SocketTimeoutException) {
+                // NTRIP v1 casters may keep the connection open after the table.
+            }
+            return parseSourcetable(body.toString())
+        } finally {
+            try { sock.close() } catch (_: IOException) {}
+        }
+    }
+
+    private fun createSocket(config: NtripConfig, timeoutMs: Int): Socket {
+        val sock = if (config.useTls) {
+            SSLSocketFactory.getDefault().createSocket(config.host, config.port) as Socket
+        } else {
+            Socket(config.host, config.port)
+        }
+        sock.soTimeout = timeoutMs
+        return sock
     }
 
     private fun parseSourcetable(text: String): List<NtripMountpoint> {

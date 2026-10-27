@@ -7,30 +7,20 @@ data class NtripConfig(
     val name: String,
     val host: String,
     val port: Int = 2101,
+    val useTls: Boolean = false,
     val mountpoint: String = "",
     val username: String = "",
     val password: String = "",
     val sendGga: Boolean = true,
     val ggaIntervalSeconds: Int = 10,
 ) {
-    val url: String get() = "http://$host:$port/$mountpoint"
+    val url: String get() = "${if (useTls) "https" else "http"}://$host:$port/$mountpoint"
 
     companion object {
-        /** Pre-configured caster entries for Greece. */
         val PRESETS = listOf(
             NtripConfig(
-                name = "HEPOS (Ktimatologio)",
-                host = "hepos.ktimatologio.gr",
-                port = 2101,
-            ),
-            NtripConfig(
-                name = "CivilPOS",
-                host = "ntrip.civilpos.com",
-                port = 2101,
-            ),
-            NtripConfig(
-                name = "Hexagon SmartNet Greece",
-                host = "ntrip.smartnet-eu.com",
+                name = "IBGE · RBMC-IP",
+                host = "170.84.40.52",
                 port = 2101,
             ),
         )
